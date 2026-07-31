@@ -334,3 +334,124 @@ Esta tarefa implementa uma função pura do domínio e ainda não expõe a decis
 
 Os comandos acima comprovam o cálculo e o limite do bootstrap, mas não comprovam persistência, atomicidade, idempotência, concorrência ou contrato HTTP, que pertencem a tarefas posteriores.
 
+## Tarefa 5 — Implementar a regra percentual
+
+### Objetivo verificável
+
+Confirmar diretamente no domínio que:
+
+- bootstrap e regra percentual são selecionados pelo total projetado;
+- a solicitação que faz a carteira atingir R$ 100.000,00 já usa a regra percentual;
+- concentrações abaixo e exatamente no limite são aprovadas, enquanto valores acima são negados;
+- o limite específico de SP e o limite padrão das demais UFs vêm da política;
+- a comparação permanece exata para números maiores que `Number.MAX_SAFE_INTEGER`;
+- snapshots de exposição impossíveis são rejeitados.
+
+Todos os valores monetários abaixo estão em centavos e são processados como `bigint`.
+
+### Transição exata para a regra percentual
+
+Depois de executar `npm run build`:
+
+```bash
+node --input-type=module -e 'import { decideLoan } from "./dist/domain/loan-decision.js"; import { INITIAL_CONCENTRATION_POLICY } from "./dist/domain/concentration-policy.js"; import { createLoanAmount, createUf } from "./dist/domain/loan-decision-input.js"; console.log(decideLoan({ currentTotalExposure: 9000000n, currentUfExposure: 0n, requestedAmount: createLoanAmount(1000000), uf: createUf("GO"), policy: INITIAL_CONCENTRATION_POLICY }));'
+```
+
+Resultado esperado:
+
+```text
+{
+  approved: true,
+  appliedRule: 'PERCENTAGE',
+  projectedTotalExposure: 10000000n,
+  projectedUfExposure: 1000000n
+}
+```
+
+O total projetado atinge exatamente R$ 100.000,00 e GO fica exatamente em 10%. A evidência principal é `appliedRule: 'PERCENTAGE'`.
+
+### Limite padrão abaixo, exatamente no limite e acima
+
+```bash
+node --input-type=module -e 'import { decideLoan } from "./dist/domain/loan-decision.js"; import { INITIAL_CONCENTRATION_POLICY } from "./dist/domain/concentration-policy.js"; import { createLoanAmount, createUf } from "./dist/domain/loan-decision-input.js"; for (const [scenario, currentUfExposure] of [["below", 900000n], ["exactly", 1000000n], ["above", 1000001n]]) { const result = decideLoan({ currentTotalExposure: 19000000n, currentUfExposure, requestedAmount: createLoanAmount(1000000), uf: createUf("GO"), policy: INITIAL_CONCENTRATION_POLICY }); console.log(scenario, result.approved, result.appliedRule, result.projectedUfExposure); }'
+```
+
+Resultado esperado:
+
+```text
+below true PERCENTAGE 1900000n
+exactly true PERCENTAGE 2000000n
+above false PERCENTAGE 2000001n
+```
+
+Com total projetado de R$ 200.000,00, o limite padrão de 10% corresponde a R$ 20.000,00.
+
+### Limite específico de SP
+
+```bash
+node --input-type=module -e 'import { decideLoan } from "./dist/domain/loan-decision.js"; import { INITIAL_CONCENTRATION_POLICY } from "./dist/domain/concentration-policy.js"; import { createLoanAmount, createUf } from "./dist/domain/loan-decision-input.js"; for (const [scenario, currentUfExposure] of [["exactly", 3000000n], ["above", 3000001n]]) { const result = decideLoan({ currentTotalExposure: 19000000n, currentUfExposure, requestedAmount: createLoanAmount(1000000), uf: createUf("SP"), policy: INITIAL_CONCENTRATION_POLICY }); console.log(scenario, result.approved, result.projectedUfExposure); }'
+```
+
+Resultado esperado:
+
+```text
+exactly true 4000000n
+above false 4000001n
+```
+
+Com total projetado de R$ 200.000,00, o limite específico de 20% de SP corresponde a R$ 40.000,00.
+
+### Aritmética exata acima do limite seguro de `number`
+
+```bash
+node --input-type=module -e 'import { decideLoan } from "./dist/domain/loan-decision.js"; import { INITIAL_CONCENTRATION_POLICY } from "./dist/domain/concentration-policy.js"; import { createLoanAmount, createUf } from "./dist/domain/loan-decision-input.js"; const hugeExposure = 10n ** 100n; console.log(decideLoan({ currentTotalExposure: hugeExposure * 10n, currentUfExposure: hugeExposure, requestedAmount: createLoanAmount(1), uf: createUf("GO"), policy: INITIAL_CONCENTRATION_POLICY }));'
+```
+
+Resultado esperado:
+
+- `approved: false`;
+- `appliedRule: 'PERCENTAGE'`;
+- exposições projetadas impressas como `bigint`, sem `Infinity`, arredondamento ou exceção de overflow.
+
+A negativa está correta porque a exposição de GO, que estava em 10%, aumenta um centavo enquanto o total aumenta apenas um centavo. A implementação compara produtos inteiros, sem efetuar divisão.
+
+### Snapshot de exposição inválido
+
+```bash
+node --input-type=module -e 'import { decideLoan } from "./dist/domain/loan-decision.js"; import { INITIAL_CONCENTRATION_POLICY } from "./dist/domain/concentration-policy.js"; import { createLoanAmount, createUf } from "./dist/domain/loan-decision-input.js"; try { decideLoan({ currentTotalExposure: 1n, currentUfExposure: 2n, requestedAmount: createLoanAmount(1), uf: createUf("GO"), policy: INITIAL_CONCENTRATION_POLICY }); } catch (error) { console.log(error.name, error.message); }'
+```
+
+Resultado esperado:
+
+```text
+InvalidExposureSnapshotError exposures must be non-negative and UF exposure cannot exceed total exposure
+```
+
+Também são inválidas exposições total ou da UF negativas.
+
+### Verificação automatizada complementar
+
+Execute a especificação completa da Tarefa 5:
+
+```bash
+npm test -- src/domain/loan-decision.test.ts
+```
+
+O arquivo deve executar 12 casos com sucesso.
+
+Para verificar todo o projeto:
+
+```bash
+npm test
+npm run typecheck
+npm run build
+```
+
+Todos os comandos devem terminar com sucesso.
+
+### Por que a Tarefa 5 não está no Postman
+
+A decisão completa de concentração ainda é uma função pura do domínio. O endpoint `POST /loan-decisions` somente será exposto na Tarefa 13. A coleção Postman continua apenas com o health check para não representar uma interface HTTP inexistente.
+
+Estes testes comprovam o resultado determinístico da regra, mas ainda não comprovam persistência, atomicidade, idempotência, concorrência ou serialização HTTP.
+

@@ -1,0 +1,158 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1120" viewBox="0 0 1600 1120">
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M1,1 L11,6 L1,11 Z" fill="#202124"/>
+    </marker>
+    <marker id="arrowBlue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M1,1 L11,6 L1,11 Z" fill="#2764b7"/>
+    </marker>
+    <filter id="rough" x="-5%" y="-5%" width="110%" height="110%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.01" numOctaves="1" seed="9" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="0.8"/>
+    </filter>
+    <style>
+      .title { font: 700 30px "Comic Sans MS","Segoe Print",cursive; fill:#202124; }
+      .lane { font: 700 20px "Comic Sans MS","Segoe Print",cursive; fill:#334155; }
+      .label { font: 20px "Comic Sans MS","Segoe Print",cursive; fill:#202124; }
+      .small { font: 16px "Comic Sans MS","Segoe Print",cursive; fill:#35363a; }
+      .tiny { font: 14px "Comic Sans MS","Segoe Print",cursive; fill:#475569; }
+      .box { stroke:#202124; stroke-width:3; rx:18; ry:18; filter:url(#rough); }
+      .line { fill:none; stroke:#202124; stroke-width:3; marker-end:url(#arrow); filter:url(#rough); }
+      .blue { fill:none; stroke:#2764b7; stroke-width:3; marker-end:url(#arrowBlue); filter:url(#rough); }
+      .dash { stroke-dasharray:10 8; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1120" fill="#fffdf8"/>
+  <text x="800" y="44" text-anchor="middle" class="title">Loan Decision — arquitetura do backend</text>
+  <text x="800" y="72" text-anchor="middle" class="tiny">PRD 0.8 • decisão e criação do empréstimo • sem desembolso, eventos, worker ou webhook</text>
+
+  <!-- Main request flow -->
+  <rect x="35" y="98" width="1130" height="740" fill="#f8fbff" stroke="#94a3b8" stroke-width="2" rx="22"/>
+  <text x="58" y="132" class="lane">Fluxo síncrono</text>
+
+  <rect x="70" y="175" width="220" height="145" fill="#fff" class="box"/>
+  <text x="180" y="212" text-anchor="middle" class="label">POST /loan-decisions</text>
+  <text x="180" y="244" text-anchor="middle" class="small">borrower_id • UF • amount</text>
+  <text x="180" y="274" text-anchor="middle" class="small">Idempotency-Key</text>
+  <text x="180" y="302" text-anchor="middle" class="tiny">usuário já autenticado</text>
+
+  <rect x="350" y="175" width="260" height="145" fill="#e8f0fe" class="box"/>
+  <text x="480" y="212" text-anchor="middle" class="label">Fronteira HTTP</text>
+  <text x="480" y="244" text-anchor="middle" class="small">valida schema, UF e amount</text>
+  <text x="480" y="274" text-anchor="middle" class="tiny">gera correlation_id</text>
+  <text x="480" y="302" text-anchor="middle" class="tiny">entrada inválida → 400</text>
+  <path d="M290 247 C310 247,330 247,350 247" class="line"/>
+
+  <rect x="670" y="175" width="260" height="145" fill="#fff4d6" class="box"/>
+  <text x="800" y="212" text-anchor="middle" class="label">Idempotência</text>
+  <text x="800" y="244" text-anchor="middle" class="small">solicitante + chave + hash</text>
+  <text x="800" y="274" text-anchor="middle" class="tiny">mesmo payload → resposta salva</text>
+  <text x="800" y="302" text-anchor="middle" class="tiny">payload diferente → 409</text>
+  <path d="M610 247 C630 247,650 247,670 247" class="line"/>
+
+  <!-- Transaction boundary -->
+  <rect x="650" y="355" width="480" height="430" fill="none" stroke="#2764b7" stroke-width="3" stroke-dasharray="12 8" rx="25"/>
+  <text x="890" y="384" text-anchor="middle" class="tiny" fill="#2764b7">TRANSAÇÃO POSTGRESQL CURTA</text>
+
+  <rect x="680" y="410" width="200" height="94" fill="#eef7ee" class="box"/>
+  <text x="780" y="442" text-anchor="middle" class="small">Bloqueia agregados</text>
+  <text x="780" y="472" text-anchor="middle" class="tiny">TOTAL + UF</text>
+  <text x="780" y="494" text-anchor="middle" class="tiny">FOR UPDATE</text>
+
+  <rect x="920" y="410" width="180" height="94" fill="#f6f0ff" class="box"/>
+  <text x="1010" y="442" text-anchor="middle" class="small">Lê política vigente</text>
+  <text x="1010" y="472" text-anchor="middle" class="tiny">limite padrão / UF</text>
+  <text x="1010" y="494" text-anchor="middle" class="tiny">policy_version</text>
+  <path d="M880 457 C893 457,907 457,920 457" class="line"/>
+
+  <rect x="720" y="535" width="340" height="95" fill="#fff4d6" class="box"/>
+  <text x="890" y="566" text-anchor="middle" class="small">Calcula exposição projetada</text>
+  <text x="890" y="594" text-anchor="middle" class="tiny">bootstrap &lt; R$ 100 mil ou percentual</text>
+  <text x="890" y="617" text-anchor="middle" class="tiny">limite derivado da política vigente</text>
+  <path d="M1010 504 C1010 520,980 528,960 535" class="line"/>
+
+  <polygon points="890,650 985,704 890,758 795,704" fill="#fff4d6" stroke="#202124" stroke-width="3" filter="url(#rough)"/>
+  <text x="890" y="698" text-anchor="middle" class="tiny">limite</text>
+  <text x="890" y="720" text-anchor="middle" class="tiny">respeitado?</text>
+  <path d="M890 630 L890 650" class="line"/>
+  <path d="M800 320 C800 340,780 365,780 410" class="line"/>
+
+  <!-- Outcomes -->
+  <rect x="80" y="480" width="245" height="170" fill="#fde8e7" class="box"/>
+  <text x="202" y="516" text-anchor="middle" class="label">Negado → COMMIT</text>
+  <text x="202" y="548" text-anchor="middle" class="small">não cria loan</text>
+  <text x="202" y="576" text-anchor="middle" class="small">não altera agregados</text>
+  <text x="202" y="604" text-anchor="middle" class="tiny">salva resposta + policy_version</text>
+  <text x="202" y="632" text-anchor="middle" class="tiny">retorna 200 DENIED</text>
+  <path d="M795 704 C650 690,470 620,325 566" class="line"/>
+  <text x="570" y="654" class="tiny">não</text>
+
+  <rect x="370" y="655" width="300" height="145" fill="#e7f6ec" class="box"/>
+  <text x="520" y="690" text-anchor="middle" class="label">Aprovado → COMMIT</text>
+  <text x="520" y="720" text-anchor="middle" class="small">cria loan</text>
+  <text x="520" y="748" text-anchor="middle" class="small">atualiza TOTAL + UF</text>
+  <text x="520" y="776" text-anchor="middle" class="tiny">salva resposta + policy_version</text>
+  <path d="M795 704 C750 704,715 718,670 727" class="line"/>
+  <text x="730" y="692" class="tiny">sim</text>
+
+  <rect x="80" y="690" width="225" height="110" fill="#fff" class="box"/>
+  <text x="192" y="726" text-anchor="middle" class="label">Resposta</text>
+  <text x="192" y="757" text-anchor="middle" class="small">200 APPROVED</text>
+  <text x="192" y="783" text-anchor="middle" class="tiny">message + loan_id</text>
+  <path d="M370 745 C350 745,325 745,305 745" class="line"/>
+
+  <!-- Database panel -->
+  <rect x="1195" y="98" width="370" height="740" fill="#fffaf0" stroke="#202124" stroke-width="3" rx="24" filter="url(#rough)"/>
+  <text x="1380" y="136" text-anchor="middle" class="lane">PostgreSQL</text>
+  <text x="1380" y="162" text-anchor="middle" class="tiny">um commit atômico</text>
+
+  <rect x="1230" y="195" width="300" height="120" fill="#e7f6ec" class="box"/>
+  <text x="1380" y="230" text-anchor="middle" class="label">loans</text>
+  <text x="1380" y="260" text-anchor="middle" class="small">fonte oficial da exposição</text>
+  <text x="1380" y="288" text-anchor="middle" class="tiny">somente empréstimos aprovados</text>
+
+  <rect x="1230" y="345" width="300" height="120" fill="#e8f0fe" class="box"/>
+  <text x="1380" y="380" text-anchor="middle" class="label">exposure_aggregates</text>
+  <text x="1380" y="410" text-anchor="middle" class="small">TOTAL + uma linha por UF</text>
+  <text x="1380" y="438" text-anchor="middle" class="tiny">derivado e reconstruível de loans</text>
+
+  <rect x="1230" y="495" width="300" height="120" fill="#f6f0ff" class="box"/>
+  <text x="1380" y="530" text-anchor="middle" class="label">state_policies</text>
+  <text x="1380" y="560" text-anchor="middle" class="small">versão + bootstrap</text>
+  <text x="1380" y="588" text-anchor="middle" class="tiny">limite padrão + exceções por UF</text>
+  <text x="1380" y="608" text-anchor="middle" class="tiny">inicial: padrão 10% • SP 20%</text>
+
+  <rect x="1230" y="645" width="300" height="135" fill="#fff4d6" class="box"/>
+  <text x="1380" y="680" text-anchor="middle" class="label">idempotency_requests</text>
+  <text x="1380" y="710" text-anchor="middle" class="small">chave + hash + resultado</text>
+  <text x="1380" y="738" text-anchor="middle" class="tiny">resposta + policy_version</text>
+  <text x="1380" y="764" text-anchor="middle" class="tiny">unicidade por solicitante + chave</text>
+
+  <path d="M1130 580 C1150 580,1175 580,1195 580" class="blue dash"/>
+  <text x="1162" y="562" text-anchor="middle" class="tiny" fill="#2764b7">read/write</text>
+
+  <!-- Cross-cutting concerns -->
+  <rect x="35" y="865" width="1530" height="215" fill="#f8fff9" stroke="#94a3b8" stroke-width="2" rx="22"/>
+  <text x="58" y="900" class="lane">Garantias transversais</text>
+
+  <rect x="75" y="930" width="320" height="115" fill="#e8f0fe" class="box"/>
+  <text x="235" y="965" text-anchor="middle" class="label">Logs técnicos mínimos</text>
+  <text x="235" y="995" text-anchor="middle" class="small">correlation_id • status • duração</text>
+  <text x="235" y="1023" text-anchor="middle" class="tiny">sem tokens, segredos, PII ou payload completo</text>
+
+  <rect x="445" y="930" width="320" height="115" fill="#eef7ee" class="box"/>
+  <text x="605" y="965" text-anchor="middle" class="label">Segurança</text>
+  <text x="605" y="995" text-anchor="middle" class="small">queries parametrizadas • menor privilégio</text>
+  <text x="605" y="1023" text-anchor="middle" class="tiny">TLS • segredos fora do código</text>
+
+  <rect x="815" y="930" width="320" height="115" fill="#fff4d6" class="box"/>
+  <text x="975" y="965" text-anchor="middle" class="label">Consistência</text>
+  <text x="975" y="995" text-anchor="middle" class="small">locks + transação curta</text>
+  <text x="975" y="1023" text-anchor="middle" class="tiny">rollback integral em falha técnica</text>
+
+  <rect x="1185" y="930" width="320" height="115" fill="#f6f0ff" class="box"/>
+  <text x="1345" y="965" text-anchor="middle" class="label">Testes automatizados</text>
+  <text x="1345" y="995" text-anchor="middle" class="small">unitários + integração</text>
+  <text x="1345" y="1023" text-anchor="middle" class="tiny">regras, HTTP, banco e concorrência</text>
+</svg>

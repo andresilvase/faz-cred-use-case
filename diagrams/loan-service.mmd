@@ -1,0 +1,10 @@
+flowchart TD
+    A["Receber solicitação"] --> B["Iniciar transação"]
+    B --> C["Bloquear TOTAL e UF em exposure_aggregates"]
+    C --> D["Calcular concentração projetada"]
+    D --> E{"Limite respeitado?"}
+    E -- Não --> F["Não criar loan"]
+    E -- Sim --> G["Criar loan"]
+    G --> H["Atualizar TOTAL e UF"]
+    F --> I["Commit da resposta idempotente"]
+    H --> I

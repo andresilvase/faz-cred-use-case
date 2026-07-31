@@ -17,4 +17,8 @@ describe("loadConfig", () => {
       );
     },
   );
+
+  it("accepts a valid PORT value", () => {
+    expect(loadConfig({ PORT: "3000" })).toEqual({ port: 3000 });
+  })
 });

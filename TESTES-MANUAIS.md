@@ -130,3 +130,94 @@ O arquivo deve executar 23 casos com sucesso.
 Esta tarefa implementa somente funções puras do domínio. O endpoint `POST /loan-decisions` está previsto para a Tarefa 13. Até lá, expor essa validação por HTTP exigiria antecipar o plano ou criar uma rota artificial de teste.
 
 Este procedimento comprova o comportamento das funções publicadas pelo módulo, mas não comprova o futuro mapeamento de erros do domínio para respostas HTTP.
+
+## Tarefa 3 — Modelar a política versionada
+
+### Objetivo verificável
+
+Confirmar diretamente no domínio que:
+
+- a política inicial possui versão `1` e limiar de bootstrap de R$ 100.000 em unidade monetária mínima;
+- SP usa o limite específico de 20%, enquanto uma UF sem exceção usa o limite padrão de 10%;
+- outra versão pode fornecer percentuais diferentes sem alteração da lógica de domínio;
+- políticas inconsistentes são rejeitadas explicitamente.
+
+Os percentuais são representados em pontos-base: `1_000` equivale a 10%, `2_000` a 20% e `10_000` a 100%.
+
+### Política inicial e fallback por UF
+
+Depois de executar `npm run build`:
+
+```bash
+node --input-type=module -e 'import { INITIAL_CONCENTRATION_POLICY } from "./dist/domain/concentration-policy.js"; import { createUf } from "./dist/domain/loan-decision-input.js"; console.log({ version: INITIAL_CONCENTRATION_POLICY.version, minimumPortfolioForPercentageRule: INITIAL_CONCENTRATION_POLICY.minimumPortfolioForPercentageRule, spLimitBasisPoints: INITIAL_CONCENTRATION_POLICY.limitFor(createUf("SP")), goLimitBasisPoints: INITIAL_CONCENTRATION_POLICY.limitFor(createUf("GO")) });'
+```
+
+Resultado esperado:
+
+```text
+{
+  version: '1',
+  minimumPortfolioForPercentageRule: 10000000n,
+  spLimitBasisPoints: 2000,
+  goLimitBasisPoints: 1000
+}
+```
+
+O valor `10000000n` representa R$ 100.000,00 em centavos. O resultado de GO comprova o fallback para o limite padrão, enquanto SP resolve sua exceção específica.
+
+### Política futura com percentuais diferentes
+
+```bash
+node --input-type=module -e 'import { createConcentrationPolicy } from "./dist/domain/concentration-policy.js"; import { createUf } from "./dist/domain/loan-decision-input.js"; const policy = createConcentrationPolicy({ version: "future-policy", minimumPortfolioForPercentageRule: 20000000, defaultLimitBasisPoints: 2500, stateLimitBasisPoints: { SP: 3000 } }); console.log({ version: policy.version, goLimitBasisPoints: policy.limitFor(createUf("GO")), spLimitBasisPoints: policy.limitFor(createUf("SP")) });'
+```
+
+Resultado esperado:
+
+```text
+{
+  version: 'future-policy',
+  goLimitBasisPoints: 2500,
+  spLimitBasisPoints: 3000
+}
+```
+
+Esse cenário evidencia que os percentuais são dados da política versionada, não constantes da lógica de decisão.
+
+### Política inválida
+
+```bash
+node --input-type=module -e 'import { createConcentrationPolicy } from "./dist/domain/concentration-policy.js"; try { createConcentrationPolicy({ version: "invalid-policy", minimumPortfolioForPercentageRule: 10000000, defaultLimitBasisPoints: 10001 }); } catch (error) { console.log(error.name, error.field, error.message); }'
+```
+
+Resultado esperado:
+
+```text
+InvalidConcentrationPolicyError defaultLimitBasisPoints defaultLimitBasisPoints must be an integer between 0 and 10000
+```
+
+### Verificação automatizada complementar
+
+Execute a especificação completa da Tarefa 3:
+
+```bash
+npm test -- src/domain/concentration-policy.test.ts
+```
+
+O arquivo deve executar 13 casos com sucesso.
+
+Para confirmar que o incremento não quebrou tarefas anteriores:
+
+```bash
+npm test
+npm run typecheck
+npm run build
+```
+
+Todos os comandos devem terminar com sucesso.
+
+### Por que a Tarefa 3 não está no Postman
+
+Esta tarefa adiciona somente o modelo e as validações da política no domínio. A política ainda não é exposta por HTTP e o endpoint `POST /loan-decisions` está previsto para a Tarefa 13. Por isso, a coleção Postman continua apenas com o health check; adicionar uma requisição agora criaria uma superfície inexistente.
+
+Os comandos acima comprovam a resolução dos parâmetros e as validações do modelo. Eles ainda não comprovam o cálculo de aprovação ou negativa, que começa nas Tarefas 4 e 5.
+

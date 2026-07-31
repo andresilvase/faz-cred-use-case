@@ -49,7 +49,7 @@ O empréstimo é aprovado somente quando a concentração projetada não ultrapa
 Os diagramas registram a evolução da solução em ordem cronológica:
 
 1. [general-flow.svg](diagrams/general-flow.svg) — rascunho inicial do fluxo geral entre usuário, Loan Service e banco de dados.
-2. [transaction-process.svg](diagrams/transaction-process.svg) — refinamento do funcionamento interno, com transação, bloqueio dos agregados, cálculo projetado e caminhos de aprovação ou negativa.
+2. [transaction-process.svg](diagrams/loan-service.mmd) — refinamento do funcionamento interno, com transação, bloqueio dos agregados, cálculo projetado e caminhos de aprovação ou negativa.
 3. [fluxo-backend-0.8.svg](diagrams/fluxo-backend-0.8.svg) — arquitetura final proposta para o MVP da PRD 0.8.
 
 O primeiro arquivo é histórico e não representa sozinho a especificação vigente. O SVG abaixo é a referência visual final do MVP:

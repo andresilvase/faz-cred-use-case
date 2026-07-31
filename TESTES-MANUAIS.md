@@ -221,3 +221,116 @@ Esta tarefa adiciona somente o modelo e as validações da política no domínio
 
 Os comandos acima comprovam a resolução dos parâmetros e as validações do modelo. Eles ainda não comprovam o cálculo de aprovação ou negativa, que começa nas Tarefas 4 e 5.
 
+## Tarefa 4 — Implementar a decisão durante o bootstrap
+
+### Objetivo verificável
+
+Confirmar diretamente no domínio que, enquanto o total projetado for inferior ao limiar da política:
+
+- a exposição total e a exposição da UF são projetadas com o valor solicitado;
+- o limite absoluto da UF é derivado do percentual aplicável e do limiar de bootstrap;
+- a solicitação é aprovada quando a exposição projetada da UF está exatamente no limite;
+- a solicitação é negada quando a exposição projetada da UF ultrapassa o limite;
+- o bootstrap deixa de ser aplicado quando o total projetado alcança o limiar.
+
+Todos os valores monetários abaixo estão em centavos e são processados como `bigint`.
+
+### Aprovação de SP exatamente no limite inicial
+
+Depois de executar `npm run build`:
+
+```bash
+node --input-type=module -e 'import { decideDuringBootstrap } from "./dist/domain/bootstrap-loan-decision.js"; import { INITIAL_CONCENTRATION_POLICY } from "./dist/domain/concentration-policy.js"; import { createLoanAmount, createUf } from "./dist/domain/loan-decision-input.js"; console.log(decideDuringBootstrap({ currentTotalExposure: 0n, currentUfExposure: 0n, requestedAmount: createLoanAmount(2000000), uf: createUf("SP"), policy: INITIAL_CONCENTRATION_POLICY }));'
+```
+
+Resultado esperado:
+
+```text
+{
+  approved: true,
+  projectedTotalExposure: 2000000n,
+  projectedUfExposure: 2000000n,
+  bootstrapUfLimit: 2000000n
+}
+```
+
+Isso representa uma solicitação de R$ 20.000,00 aprovada exatamente no limite de SP definido pela política inicial.
+
+### Negativa de SP acima do limite inicial
+
+```bash
+node --input-type=module -e 'import { decideDuringBootstrap } from "./dist/domain/bootstrap-loan-decision.js"; import { INITIAL_CONCENTRATION_POLICY } from "./dist/domain/concentration-policy.js"; import { createLoanAmount, createUf } from "./dist/domain/loan-decision-input.js"; console.log(decideDuringBootstrap({ currentTotalExposure: 2000000n, currentUfExposure: 2000000n, requestedAmount: createLoanAmount(1), uf: createUf("SP"), policy: INITIAL_CONCENTRATION_POLICY }));'
+```
+
+Resultado esperado:
+
+```text
+{
+  approved: false,
+  projectedTotalExposure: 2000001n,
+  projectedUfExposure: 2000001n,
+  bootstrapUfLimit: 2000000n
+}
+```
+
+Um centavo acima do limite já deve produzir `approved: false`.
+
+### Limite derivado de outra versão de política
+
+```bash
+node --input-type=module -e 'import { decideDuringBootstrap } from "./dist/domain/bootstrap-loan-decision.js"; import { createConcentrationPolicy } from "./dist/domain/concentration-policy.js"; import { createLoanAmount, createUf } from "./dist/domain/loan-decision-input.js"; const policy = createConcentrationPolicy({ version: "future-policy", minimumPortfolioForPercentageRule: 20000000, defaultLimitBasisPoints: 2500, stateLimitBasisPoints: { SP: 3000 } }); console.log(decideDuringBootstrap({ currentTotalExposure: 8000000n, currentUfExposure: 4000000n, requestedAmount: createLoanAmount(1000000), uf: createUf("GO"), policy }));'
+```
+
+Resultado esperado:
+
+```text
+{
+  approved: true,
+  projectedTotalExposure: 9000000n,
+  projectedUfExposure: 5000000n,
+  bootstrapUfLimit: 5000000n
+}
+```
+
+O teto de R$ 50.000,00 resulta dos 25% definidos pela política futura sobre seu limiar de R$ 200.000,00. Isso evidencia que o cálculo não contém os percentuais da política inicial fixados no código.
+
+### Transição para fora do bootstrap
+
+```bash
+node --input-type=module -e 'import { decideDuringBootstrap } from "./dist/domain/bootstrap-loan-decision.js"; import { INITIAL_CONCENTRATION_POLICY } from "./dist/domain/concentration-policy.js"; import { createLoanAmount, createUf } from "./dist/domain/loan-decision-input.js"; console.log(decideDuringBootstrap({ currentTotalExposure: 9000000n, currentUfExposure: 0n, requestedAmount: createLoanAmount(1000000), uf: createUf("SP"), policy: INITIAL_CONCENTRATION_POLICY }));'
+```
+
+Resultado esperado:
+
+```text
+null
+```
+
+O total projetado chega exatamente a R$ 100.000,00. Conforme a PRD, essa solicitação já deve seguir a regra percentual, que será implementada na Tarefa 5. Nesta tarefa, `null` significa apenas que a decisão não pertence ao fluxo de bootstrap; não significa aprovação nem negativa.
+
+### Verificação automatizada complementar
+
+Execute a especificação completa da Tarefa 4:
+
+```bash
+npm test -- src/domain/bootstrap-loan-decision.test.ts
+```
+
+O arquivo deve executar 6 casos com sucesso.
+
+Para verificar também as tarefas anteriores e o projeto:
+
+```bash
+npm test
+npm run typecheck
+npm run build
+```
+
+Todos os comandos devem terminar com sucesso.
+
+### Por que a Tarefa 4 não está no Postman
+
+Esta tarefa implementa uma função pura do domínio e ainda não expõe a decisão por HTTP. O endpoint `POST /loan-decisions` está previsto para a Tarefa 13. Até lá, adicionar uma requisição Postman exigiria criar uma rota inexistente ou antecipar o plano.
+
+Os comandos acima comprovam o cálculo e o limite do bootstrap, mas não comprovam persistência, atomicidade, idempotência, concorrência ou contrato HTTP, que pertencem a tarefas posteriores.
+

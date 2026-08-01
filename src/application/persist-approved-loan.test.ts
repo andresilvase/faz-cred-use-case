@@ -37,6 +37,10 @@ describe("PersistApprovedLoan", () => {
 
     const result = await useCase.execute(input);
 
+    if (result.decision !== "APPROVED") {
+      throw new Error("expected the loan to be approved");
+    }
+
     expect(result).toMatchObject({
       decision: "APPROVED",
       message: "O valor solicitado foi aprovado.",
@@ -83,6 +87,52 @@ describe("PersistApprovedLoan", () => {
       { aggregateKey: "GO", amount: "1000000" },
       { aggregateKey: "TOTAL", amount: "1000000" },
     ]);
+  });
+
+  it("returns a denied decision without creating a loan or changing prior exposure", async () => {
+    const useCase = new PersistApprovedLoan(
+      new PostgresApprovedLoanTransaction(harness.pool),
+    );
+    await useCase.execute(
+      createLoanDecisionInput({
+        borrowerId: "borrower-approved",
+        uf: "GO",
+        amount: 1_000_000,
+      }),
+    );
+
+    const result = await useCase.execute(
+      createLoanDecisionInput({
+        borrowerId: "borrower-denied",
+        uf: "GO",
+        amount: 1,
+      }),
+    );
+
+    expect(result).toEqual({
+      decision: "DENIED",
+      message: "O empréstimo foi negado.",
+      policyVersion: "1",
+    });
+    await expect(
+      harness.pool.query<{ count: number }>(
+        "SELECT COUNT(*)::int AS count FROM loans",
+      ),
+    ).resolves.toMatchObject({ rows: [{ count: 1 }] });
+    await expect(
+      harness.pool.query<{ aggregateKey: string; amount: string }>(`
+        SELECT
+          aggregate_key AS "aggregateKey",
+          amount_minor_units::text AS amount
+        FROM exposure_aggregates
+        ORDER BY aggregate_key
+      `),
+    ).resolves.toMatchObject({
+      rows: [
+        { aggregateKey: "GO", amount: "1000000" },
+        { aggregateKey: "TOTAL", amount: "1000000" },
+      ],
+    });
   });
 
   it("reads a new active policy inside the transaction and persists its version", async () => {

@@ -1,25 +1,18 @@
 import {
   attachPersistedLoanId,
   createLoanDecisionResult,
-  type PersistedApprovedLoanDecisionResult,
+  type CompletedLoanDecisionResult,
 } from "../domain/loan-decision-result.js";
 import type { LoanDecisionInput } from "../domain/loan-decision-input.js";
 import { decideLoan } from "../domain/loan-decision.js";
 import type { ApprovedLoanTransactionRunner } from "./approved-loan-transaction.js";
-
-export class LoanNotApprovedForPersistenceError extends Error {
-  constructor() {
-    super("the loan was not approved for persistence");
-    this.name = "LoanNotApprovedForPersistenceError";
-  }
-}
 
 export class PersistApprovedLoan {
   constructor(private readonly transactions: ApprovedLoanTransactionRunner) {}
 
   async execute(
     input: LoanDecisionInput,
-  ): Promise<PersistedApprovedLoanDecisionResult> {
+  ): Promise<CompletedLoanDecisionResult> {
     return this.transactions.run(async (transaction) => {
       const exposure = await transaction.lockExposure(input.uf);
       const policy = await transaction.loadActivePolicy();
@@ -36,7 +29,7 @@ export class PersistApprovedLoan {
       );
 
       if (decisionResult.decision !== "APPROVED") {
-        throw new LoanNotApprovedForPersistenceError();
+        return decisionResult;
       }
 
       const loanId = await transaction.insertLoan(input, policy.version);

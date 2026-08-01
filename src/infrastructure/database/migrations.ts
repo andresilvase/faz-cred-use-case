@@ -68,4 +68,27 @@ export const MIGRATIONS: readonly Migration[] = [
       ) VALUES ('1', 'SP', 2000);
     `,
   },
+  {
+    version: "0003_create_exposure_aggregates",
+    sql: `
+      CREATE TABLE exposure_aggregates (
+        aggregate_key varchar(5) PRIMARY KEY,
+        amount_minor_units bigint NOT NULL DEFAULT 0,
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT exposure_aggregates_key_valid CHECK (
+          aggregate_key = 'TOTAL'
+          OR aggregate_key IN (
+            'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO',
+            'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI',
+            'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'
+          )
+        ),
+        CONSTRAINT exposure_aggregates_amount_non_negative
+          CHECK (amount_minor_units >= 0)
+      );
+
+      INSERT INTO exposure_aggregates (aggregate_key)
+      VALUES ('TOTAL');
+    `,
+  },
 ];

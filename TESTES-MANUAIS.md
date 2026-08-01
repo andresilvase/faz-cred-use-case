@@ -567,3 +567,132 @@ A tarefa define contratos lógicos e a serialização pública no domínio, mas 
 
 Os comandos acima comprovam mensagens, campos e separação entre resultado interno e público. Eles não comprovam persistência real, contrato HTTP, idempotência ou atomicidade.
 
+## Tarefa 7 — Preparar PostgreSQL e testes de integração
+
+### Objetivo verificável
+
+Confirmar que o harness de integração:
+
+- inicia um PostgreSQL 17 descartável por Testcontainers;
+- aceita conexões feitas pelo pool de `pg`;
+- limpa o schema público entre os testes;
+- aplica migrations em um banco vazio;
+- não reaplica uma migration já registrada;
+- desfaz toda a transação quando uma migration falha;
+- encerra o pool e o container ao terminar.
+
+### Pré-requisitos
+
+Além dos requisitos comuns, esta tarefa exige:
+
+- Docker Desktop ou Docker Engine em execução;
+- permissão para o usuário atual acessar o daemon do Docker;
+- acesso inicial à imagem `postgres:17`, caso ainda não esteja armazenada localmente.
+
+Confirme o daemon:
+
+```bash
+docker info >/dev/null && echo "Docker disponível"
+```
+
+Resultado esperado:
+
+```text
+Docker disponível
+```
+
+Se o comando falhar, inicie o Docker antes de continuar. Uma falha de daemon não representa defeito na Tarefa 7.
+
+Depois de um clone limpo, instale as dependências:
+
+```bash
+npm ci
+```
+
+O comando deve terminar com exit code `0` e não deve modificar `package-lock.json`.
+
+### Executar o harness de integração
+
+Registre os containers PostgreSQL 17 existentes, execute somente a especificação da Tarefa 7 e confirme que nenhum container adicional permaneceu:
+
+```bash
+before="$(docker ps -q --filter ancestor=postgres:17 | sort)"; npm test -- src/test-support/postgres-test-harness.test.ts --reporter=verbose; status=$?; after="$(docker ps -q --filter ancestor=postgres:17 | sort)"; if [ "$before" != "$after" ]; then echo "FAIL: a lista de containers postgres:17 mudou"; docker ps --filter ancestor=postgres:17; exit 1; fi; exit "$status"
+```
+
+Na primeira execução, o download da imagem pode tornar o teste mais demorado.
+
+Resultado esperado:
+
+- exit code `0`;
+- uma suíte aprovada;
+- 4 testes aprovados;
+- nenhuma falha;
+- os seguintes cenários reportados como aprovados:
+
+```text
+starts a disposable PostgreSQL and accepts connections
+resets the database to an empty schema between tests
+applies migrations to an empty database and reapplies them safely
+rolls back every migration change when a migration fails
+```
+
+O comando compara os IDs de containers `postgres:17` antes e depois. Se já existia um container dessa imagem, ele deve continuar existindo; o teste somente não pode deixar um container adicional.
+
+### Evidências verificadas pela suíte
+
+O terceiro cenário aplica as migrations duas vezes e exige:
+
+- existência de `migration_probe`;
+- exatamente uma linha em `schema_migrations`.
+
+Isso comprova a reaplicação segura segundo a estratégia versionada atual.
+
+O quarto cenário executa uma migration válida seguida de SQL inválido e exige que, após o rollback:
+
+- `schema_migrations` não exista;
+- `should_rollback` não exista.
+
+Isso comprova o rollback transacional do lote de migrations.
+
+A limpeza entre testes é feita recriando o schema `public`. O teste que conta as tabelas exige zero tabelas no início do cenário.
+
+### Verificação completa do projeto
+
+```bash
+npm test
+npm run typecheck
+npm run build
+```
+
+Todos os comandos devem terminar com exit code `0`. A suíte completa também precisa de Docker porque agora inclui o teste de integração.
+
+Para confirmar que o harness de testes não foi incluído no artefato de produção:
+
+```bash
+test ! -e dist/test-support/postgres-test-harness.js && echo "Harness ausente do build de produção"
+```
+
+Resultado esperado:
+
+```text
+Harness ausente do build de produção
+```
+
+Execute essa última verificação após `npm run build`.
+
+### Limpeza segura
+
+O teste chama `harness.stop()` no `afterAll`, encerrando o pool e o container. Se a execução for interrompida abruptamente, confira:
+
+```bash
+docker ps --filter ancestor=postgres:17
+```
+
+Não remova containers automaticamente. Compare com os containers que já existiam antes do teste e interrompa somente um container comprovadamente criado por esta execução.
+
+### Por que a Tarefa 7 não está no Postman
+
+Esta tarefa adiciona infraestrutura de banco e uma suíte de integração, mas nenhum comportamento HTTP. A coleção Postman continua somente com o health check. Criar uma rota para migrations ou para o harness exporia uma superfície técnica indevida.
+
+Os cenários acima comprovam conexão, migrations, rollback, isolamento e descarte do PostgreSQL de testes. Eles ainda não comprovam persistência de políticas ou empréstimos, que pertencem às tarefas seguintes.
+

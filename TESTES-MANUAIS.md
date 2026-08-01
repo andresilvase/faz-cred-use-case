@@ -455,3 +455,115 @@ A decisão completa de concentração ainda é uma função pura do domínio. O 
 
 Estes testes comprovam o resultado determinístico da regra, mas ainda não comprovam persistência, atomicidade, idempotência, concorrência ou serialização HTTP.
 
+## Tarefa 6 — Definir o resultado lógico da decisão
+
+### Objetivo verificável
+
+Confirmar diretamente no domínio que:
+
+- uma aprovação usa `APPROVED` e a mensagem exata definida na PRD;
+- uma negativa usa `DENIED` e sua mensagem exata;
+- a versão da política permanece no resultado interno;
+- uma decisão aprovada ainda não avaliada como persistida não possui `loanId`;
+- o identificador somente é anexado depois do passo explícito de persistência;
+- a saída pública não expõe a versão da política;
+- a negativa pública não contém identificador de empréstimo.
+
+### Resultados internos de aprovação e negativa
+
+Depois de executar `npm run build`:
+
+```bash
+node --input-type=module -e 'import { createLoanDecisionResult } from "./dist/domain/loan-decision-result.js"; const base = { appliedRule: "BOOTSTRAP", projectedTotalExposure: 1000000n, projectedUfExposure: 1000000n }; const approved = createLoanDecisionResult({ ...base, approved: true }, "policy-version-1"); const denied = createLoanDecisionResult({ ...base, approved: false }, "policy-version-2"); console.log("approved", approved); console.log("denied", denied); console.log("approvedHasLoanId", Object.hasOwn(approved, "loanId")); console.log("deniedHasLoanId", Object.hasOwn(denied, "loanId"));'
+```
+
+Resultado esperado:
+
+```text
+approved {
+  decision: 'APPROVED',
+  message: 'O valor solicitado foi aprovado.',
+  policyVersion: 'policy-version-1'
+}
+denied {
+  decision: 'DENIED',
+  message: 'O empréstimo foi negado.',
+  policyVersion: 'policy-version-2'
+}
+approvedHasLoanId false
+deniedHasLoanId false
+```
+
+A formatação do objeto pode variar entre versões do Node.js. Os campos, valores e indicadores booleanos devem ser exatamente os demonstrados.
+
+### Aprovação após persistência e saída pública
+
+```bash
+node --input-type=module -e 'import { attachPersistedLoanId, createLoanDecisionResult, toPublicLoanDecisionResult } from "./dist/domain/loan-decision-result.js"; const evaluated = createLoanDecisionResult({ approved: true, appliedRule: "BOOTSTRAP", projectedTotalExposure: 1000000n, projectedUfExposure: 1000000n }, "policy-version-1"); const persisted = attachPersistedLoanId(evaluated, "loan-123"); console.log("persisted", persisted); console.log("public", toPublicLoanDecisionResult(persisted));'
+```
+
+Resultado esperado:
+
+```text
+persisted {
+  decision: 'APPROVED',
+  message: 'O valor solicitado foi aprovado.',
+  policyVersion: 'policy-version-1',
+  loanId: 'loan-123'
+}
+public {
+  decision: 'APPROVED',
+  message: 'O valor solicitado foi aprovado.',
+  loan_id: 'loan-123'
+}
+```
+
+A evidência principal é que `policyVersion` existe internamente, mas não aparece na saída pública. O campo público usa `loan_id`, conforme a PRD.
+
+Este passo apenas demonstra o contrato lógico que será usado depois da persistência. A Tarefa 6 ainda não grava empréstimos no banco.
+
+### Negativa pública
+
+```bash
+node --input-type=module -e 'import { createLoanDecisionResult, toPublicLoanDecisionResult } from "./dist/domain/loan-decision-result.js"; const denied = createLoanDecisionResult({ approved: false, appliedRule: "PERCENTAGE", projectedTotalExposure: 20000000n, projectedUfExposure: 2000001n }, "policy-version-2"); const result = toPublicLoanDecisionResult(denied); console.log(result); console.log({ hasPolicyVersion: Object.hasOwn(result, "policyVersion"), hasPolicyVersionSnakeCase: Object.hasOwn(result, "policy_version"), hasLoanId: Object.hasOwn(result, "loan_id") });'
+```
+
+Resultado esperado:
+
+```text
+{ decision: 'DENIED', message: 'O empréstimo foi negado.' }
+{
+  hasPolicyVersion: false,
+  hasPolicyVersionSnakeCase: false,
+  hasLoanId: false
+}
+```
+
+A negativa não deve expor versão da política nem identificador de empréstimo.
+
+### Verificação automatizada complementar
+
+Execute a especificação completa da Tarefa 6:
+
+```bash
+npm test -- src/domain/loan-decision-result.test.ts
+```
+
+O arquivo deve executar 4 casos com sucesso.
+
+Para verificar todo o projeto:
+
+```bash
+npm test
+npm run typecheck
+npm run build
+```
+
+Todos os comandos devem terminar com sucesso.
+
+### Por que a Tarefa 6 não está no Postman
+
+A tarefa define contratos lógicos e a serialização pública no domínio, mas ainda não conecta esse comportamento ao Express. O endpoint `POST /loan-decisions` será exposto na Tarefa 13. Inserir uma requisição Postman agora representaria uma rota inexistente.
+
+Os comandos acima comprovam mensagens, campos e separação entre resultado interno e público. Eles não comprovam persistência real, contrato HTTP, idempotência ou atomicidade.
+

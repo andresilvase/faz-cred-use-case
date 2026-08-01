@@ -98,8 +98,17 @@ Qualquer falha provoca rollback do conjunto inteiro. Nenhuma chamada externa aco
 |---|---|
 | `loans` | Fonte oficial dos empréstimos aprovados e da exposição |
 | `exposure_aggregates` | Projeção reconstruível com linhas para `TOTAL` e para cada UF |
-| `state_policies` | Políticas versionadas, bootstrap, limite padrão e exceções por UF |
+| `state_policies` | Dados gerais da política versionada: bootstrap, limite padrão, vigência e data de criação |
+| `state_policy_limits` | Limites específicos por UF associados a uma versão da política |
 | `idempotency_requests` | Chave, hash da solicitação, resultado, resposta e versão da política |
+
+Uma política em `state_policies` pode possuir zero ou vários registros em `state_policy_limits`. Ao decidir:
+
+1. o serviço procura um limite específico para a UF na versão vigente;
+2. se encontrar, utiliza `limit_basis_points`;
+3. caso contrário, utiliza `default_limit_basis_points` de `state_policies`.
+
+Os percentuais são armazenados em pontos-base: `1000` representa 10% e `2000` representa 20%. Na política inicial, o limite padrão é 10% e `state_policy_limits` registra a exceção de 20% para SP.
 
 `exposure_aggregates` existe para tornar consulta e bloqueio eficientes, mas não substitui `loans` como fonte oficial. Seus valores devem poder ser reconstruídos a partir dos empréstimos.
 

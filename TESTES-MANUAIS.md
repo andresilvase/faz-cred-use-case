@@ -696,3 +696,162 @@ Esta tarefa adiciona infraestrutura de banco e uma suíte de integração, mas n
 
 Os cenários acima comprovam conexão, migrations, rollback, isolamento e descarte do PostgreSQL de testes. Eles ainda não comprovam persistência de políticas ou empréstimos, que pertencem às tarefas seguintes.
 
+## Tarefa 8 — Persistir e consultar a política vigente
+
+### Objetivo verificável
+
+Confirmar no PostgreSQL descartável que:
+
+- as migrations criam as tabelas e constraints da política;
+- a versão inicial ativa é semeada com bootstrap de R$ 100.000,00;
+- o limite padrão é 10% e a exceção de SP é 20%;
+- uma nova versão ativa substitui a anterior e seus percentuais são reconstruídos no domínio;
+- a ausência de política ativa produz erro técnico explícito;
+- dados persistidos que não formam uma política de domínio válida produzem erro técnico explícito;
+- o banco impede mais de uma política ativa;
+- o banco rejeita percentuais persistidos fora do intervalo permitido.
+
+### Pré-requisitos
+
+Esta tarefa usa o mesmo PostgreSQL 17 descartável da Tarefa 7. Confirme que o Docker está disponível:
+
+```bash
+docker info >/dev/null && echo "Docker disponível"
+```
+
+Resultado esperado:
+
+```text
+Docker disponível
+```
+
+Depois de um clone limpo:
+
+```bash
+npm ci
+```
+
+O comando deve terminar com exit code `0` sem modificar `package-lock.json`.
+
+### Executar a integração da política vigente
+
+Registre os containers existentes, execute a especificação da Tarefa 8 e confirme que nenhum PostgreSQL adicional permaneceu:
+
+```bash
+before="$(docker ps -q --filter ancestor=postgres:17 | sort)"; npm test -- src/infrastructure/database/postgres-concentration-policy-repository.test.ts --reporter=verbose; test_exit_code=$?; after="$(docker ps -q --filter ancestor=postgres:17 | sort)"; if [ "$before" != "$after" ]; then echo "FAIL: a lista de containers postgres:17 mudou"; docker ps --filter ancestor=postgres:17; exit 1; fi; exit "$test_exit_code"
+```
+
+Resultado esperado:
+
+- exit code `0`;
+- uma suíte aprovada;
+- 6 testes aprovados;
+- nenhuma falha;
+- os seguintes cenários reportados como aprovados:
+
+```text
+loads the seeded initial active policy
+loads a new active version with its default and state-specific limits
+reports explicitly when no active policy exists
+reports explicitly when stored policy data cannot form a domain policy
+prevents more than one policy from being active
+rejects invalid persisted percentages
+```
+
+A comparação dos IDs de containers preserva qualquer PostgreSQL 17 que já estivesse ativo e detecta somente a permanência de um container adicional.
+
+### Evidências da política inicial
+
+O primeiro cenário exige que a política reconstruída apresente:
+
+```text
+version = 1
+minimumPortfolioForPercentageRule = 10000000n
+GO = 1000 pontos-base
+SP = 2000 pontos-base
+```
+
+Isso corresponde a:
+
+- R$ 100.000,00 como limiar de bootstrap;
+- 10% como limite padrão, observado por GO;
+- 20% como limite específico de SP.
+
+Esses valores devem vir dos registros semeados pelas migrations, não de constantes aplicadas pelo repositório.
+
+### Evidências de uma nova versão
+
+O segundo cenário desativa a versão `1`, persiste a versão `2` como ativa e exige:
+
+```text
+version = 2
+minimumPortfolioForPercentageRule = 20000000n
+GO = 2500 pontos-base
+SP = 3000 pontos-base
+```
+
+O resultado comprova a leitura de outra versão, o fallback de GO para o limite padrão de 25% e a exceção de 30% para SP.
+
+### Evidências de falha técnica e integridade
+
+A especificação exige os seguintes comportamentos:
+
+- nenhuma política ativa: `ActiveConcentrationPolicyNotFoundError`;
+- política armazenada incompatível com o domínio: `InvalidStoredConcentrationPolicyError`;
+- tentativa de manter duas políticas ativas: PostgreSQL SQLSTATE `23505`, violação de unicidade;
+- percentual `10001` persistido para uma UF: PostgreSQL SQLSTATE `23514`, violação de check constraint.
+
+Esses erros são técnicos e não representam uma negativa de empréstimo.
+
+### Verificar as migrations acumuladas
+
+A especificação do harness da Tarefa 7 foi ajustada para aceitar a quantidade atual de migrations. Execute-a novamente:
+
+```bash
+npm test -- src/test-support/postgres-test-harness.test.ts --reporter=verbose
+```
+
+Resultado esperado:
+
+- 4 testes aprovados;
+- aplicação e reaplicação segura de todas as migrations atuais;
+- rollback integral preservado.
+
+### Verificação completa do projeto
+
+```bash
+npm test
+npm run typecheck
+npm run build
+```
+
+Todos os comandos devem terminar com exit code `0`. A suíte completa requer Docker.
+
+Após o build, confirme que o suporte de testes continua fora do artefato de produção:
+
+```bash
+test ! -e dist/test-support/postgres-test-harness.js && echo "Harness ausente do build de produção"
+```
+
+Resultado esperado:
+
+```text
+Harness ausente do build de produção
+```
+
+### Limpeza segura
+
+Os testes recriam o schema `public` antes de cada cenário e encerram pool e container no `afterAll`. Se uma execução for interrompida abruptamente, liste os containers:
+
+```bash
+docker ps --filter ancestor=postgres:17
+```
+
+Não interrompa containers preexistentes. Remova somente um container comprovadamente criado pela execução interrompida.
+
+### Por que a Tarefa 8 não está no Postman
+
+A política vigente é uma dependência interna da decisão e não possui endpoint administrativo ou público. A coleção Postman continua apenas com o health check. Expor leitura ou edição de políticas por HTTP anteciparia uma interface fora do plano.
+
+Os testes acima comprovam schema, seed, constraints, leitura e reconstrução da política. Eles ainda não comprovam a transação de criação do empréstimo nem o contrato HTTP.
+

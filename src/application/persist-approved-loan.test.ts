@@ -7,7 +7,10 @@ import {
   startPostgresTestHarness,
   type PostgresTestHarness,
 } from "../test-support/postgres-test-harness.js";
-import { PersistApprovedLoan } from "./persist-approved-loan.js";
+import {
+  IdempotencyConflictError,
+  PersistApprovedLoan,
+} from "./persist-approved-loan.js";
 
 describe("PersistApprovedLoan", () => {
   let harness: PostgresTestHarness;
@@ -35,7 +38,7 @@ describe("PersistApprovedLoan", () => {
       amount: 1_000_000,
     });
 
-    const result = await useCase.execute(input);
+    const result = await useCase.execute(input, "create-approved-key");
 
     if (result.decision !== "APPROVED") {
       throw new Error("expected the loan to be approved");
@@ -89,6 +92,175 @@ describe("PersistApprovedLoan", () => {
     ]);
   });
 
+  it("replays an approved decision without duplicating its effects", async () => {
+    const useCase = new PersistApprovedLoan(
+      new PostgresApprovedLoanTransaction(harness.pool),
+    );
+    const input = createLoanDecisionInput({
+      borrowerId: "borrower-retry-approved",
+      uf: "GO",
+      amount: 500_000,
+    });
+
+    const original = await useCase.execute(input, "approval-key");
+    const replay = await useCase.execute(input, "approval-key");
+
+    if (original.decision !== "APPROVED") {
+      throw new Error("expected the original decision to be approved");
+    }
+
+    expect(replay).toEqual(original);
+    await expect(
+      harness.pool.query<{ count: number }>(
+        "SELECT COUNT(*)::int AS count FROM loans",
+      ),
+    ).resolves.toMatchObject({ rows: [{ count: 1 }] });
+    await expect(
+      harness.pool.query<{ amount: string }>(`
+        SELECT amount_minor_units::text AS amount
+        FROM exposure_aggregates
+        WHERE aggregate_key = 'TOTAL'
+      `),
+    ).resolves.toMatchObject({ rows: [{ amount: "500000" }] });
+    await expect(
+      harness.pool.query<{
+        decision: string;
+        loanId: string;
+        policyVersion: string;
+        requestHash: string;
+      }>(`
+        SELECT
+          decision,
+          loan_id::text AS "loanId",
+          policy_version AS "policyVersion",
+          request_hash AS "requestHash"
+        FROM idempotency_requests
+      `),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          decision: "APPROVED",
+          loanId: original.loanId,
+          policyVersion: "1",
+          requestHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+        },
+      ],
+    });
+  });
+
+  it("replays a denied decision without creating a loan", async () => {
+    const useCase = new PersistApprovedLoan(
+      new PostgresApprovedLoanTransaction(harness.pool),
+    );
+    const input = createLoanDecisionInput({
+      borrowerId: "borrower-retry-denied",
+      uf: "GO",
+      amount: 1_000_001,
+    });
+
+    const original = await useCase.execute(input, "denial-key");
+    const replay = await useCase.execute(input, "denial-key");
+
+    expect(replay).toEqual(original);
+    expect(replay.decision).toBe("DENIED");
+    await expect(
+      harness.pool.query<{ loanCount: number; requestCount: number }>(`
+        SELECT
+          (SELECT COUNT(*)::int FROM loans) AS "loanCount",
+          (SELECT COUNT(*)::int FROM idempotency_requests) AS "requestCount"
+      `),
+    ).resolves.toMatchObject({
+      rows: [{ loanCount: 0, requestCount: 1 }],
+    });
+  });
+
+  it("rejects an idempotency key reused with a different payload", async () => {
+    const useCase = new PersistApprovedLoan(
+      new PostgresApprovedLoanTransaction(harness.pool),
+    );
+    await useCase.execute(
+      createLoanDecisionInput({
+        borrowerId: "borrower-conflict",
+        uf: "GO",
+        amount: 400_000,
+      }),
+      "reused-key",
+    );
+
+    await expect(
+      useCase.execute(
+        createLoanDecisionInput({
+          borrowerId: "borrower-conflict",
+          uf: "GO",
+          amount: 300_000,
+        }),
+        "reused-key",
+      ),
+    ).rejects.toBeInstanceOf(IdempotencyConflictError);
+    await expect(
+      harness.pool.query<{ count: number }>(
+        "SELECT COUNT(*)::int AS count FROM loans",
+      ),
+    ).resolves.toMatchObject({ rows: [{ count: 1 }] });
+  });
+
+  it("processes distinct intentions when the same borrower uses different keys", async () => {
+    const useCase = new PersistApprovedLoan(
+      new PostgresApprovedLoanTransaction(harness.pool),
+    );
+    const input = createLoanDecisionInput({
+      borrowerId: "borrower-distinct-intentions",
+      uf: "GO",
+      amount: 400_000,
+    });
+
+    const first = await useCase.execute(input, "first-key");
+    const second = await useCase.execute(input, "second-key");
+
+    expect(first.decision).toBe("APPROVED");
+    expect(second.decision).toBe("APPROVED");
+    await expect(
+      harness.pool.query<{ loanCount: number; requestCount: number }>(`
+        SELECT
+          (SELECT COUNT(*)::int FROM loans) AS "loanCount",
+          (SELECT COUNT(*)::int FROM idempotency_requests) AS "requestCount"
+      `),
+    ).resolves.toMatchObject({
+      rows: [{ loanCount: 2, requestCount: 2 }],
+    });
+  });
+
+  it("scopes the same idempotency key independently for each borrower", async () => {
+    const useCase = new PersistApprovedLoan(
+      new PostgresApprovedLoanTransaction(harness.pool),
+    );
+
+    const first = await useCase.execute(
+      createLoanDecisionInput({
+        borrowerId: "borrower-key-scope-a",
+        uf: "GO",
+        amount: 400_000,
+      }),
+      "shared-key",
+    );
+    const second = await useCase.execute(
+      createLoanDecisionInput({
+        borrowerId: "borrower-key-scope-b",
+        uf: "GO",
+        amount: 400_000,
+      }),
+      "shared-key",
+    );
+
+    expect(first.decision).toBe("APPROVED");
+    expect(second.decision).toBe("APPROVED");
+    await expect(
+      harness.pool.query<{ count: number }>(
+        "SELECT COUNT(*)::int AS count FROM idempotency_requests",
+      ),
+    ).resolves.toMatchObject({ rows: [{ count: 2 }] });
+  });
+
   it("returns a denied decision without creating a loan or changing prior exposure", async () => {
     const useCase = new PersistApprovedLoan(
       new PostgresApprovedLoanTransaction(harness.pool),
@@ -99,6 +271,7 @@ describe("PersistApprovedLoan", () => {
         uf: "GO",
         amount: 1_000_000,
       }),
+      "prior-approval-key",
     );
 
     const result = await useCase.execute(
@@ -107,6 +280,7 @@ describe("PersistApprovedLoan", () => {
         uf: "GO",
         amount: 1,
       }),
+      "denied-key",
     );
 
     expect(result).toEqual({
@@ -157,6 +331,7 @@ describe("PersistApprovedLoan", () => {
         uf: "GO",
         amount: 2_000_000,
       }),
+      "future-policy-key",
     );
 
     expect(result.policyVersion).toBe("2");
@@ -167,19 +342,19 @@ describe("PersistApprovedLoan", () => {
     ).resolves.toMatchObject({ rows: [{ policyVersion: "2" }] });
   });
 
-  it("rolls back the loan and aggregates when updating exposure fails after insert", async () => {
+  it("rolls back the loan, aggregates and idempotency when persisting the response fails", async () => {
     await harness.pool.query(`
-      CREATE FUNCTION fail_exposure_update() RETURNS trigger AS $$
+      CREATE FUNCTION fail_idempotency_insert() RETURNS trigger AS $$
       BEGIN
-        RAISE EXCEPTION 'forced exposure update failure';
+        RAISE EXCEPTION 'forced idempotency insert failure';
         RETURN NULL;
       END;
       $$ LANGUAGE plpgsql;
 
-      CREATE TRIGGER force_exposure_update_failure
-      BEFORE UPDATE ON exposure_aggregates
+      CREATE TRIGGER force_idempotency_insert_failure
+      BEFORE INSERT ON idempotency_requests
       FOR EACH STATEMENT
-      EXECUTE FUNCTION fail_exposure_update();
+      EXECUTE FUNCTION fail_idempotency_insert();
     `);
     const useCase = new PersistApprovedLoan(
       new PostgresApprovedLoanTransaction(harness.pool),
@@ -192,8 +367,9 @@ describe("PersistApprovedLoan", () => {
           uf: "GO",
           amount: 1_000_000,
         }),
+        "rollback-key",
       ),
-    ).rejects.toThrow("forced exposure update failure");
+    ).rejects.toThrow("forced idempotency insert failure");
 
     const loans = await harness.pool.query<{ count: number }>(
       "SELECT COUNT(*)::int AS count FROM loans",
@@ -210,6 +386,11 @@ describe("PersistApprovedLoan", () => {
     `);
 
     expect(loans.rows).toEqual([{ count: 0 }]);
+    await expect(
+      harness.pool.query<{ count: number }>(
+        "SELECT COUNT(*)::int AS count FROM idempotency_requests",
+      ),
+    ).resolves.toMatchObject({ rows: [{ count: 0 }] });
     expect(aggregates.rows).toEqual([
       { aggregateKey: "TOTAL", amount: "0" },
     ]);

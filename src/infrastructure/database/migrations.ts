@@ -122,4 +122,41 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX loans_policy_version_idx ON loans (policy_version);
     `,
   },
+  {
+    version: "0005_create_idempotency_requests",
+    sql: `
+      CREATE TABLE idempotency_requests (
+        borrower_id text NOT NULL,
+        idempotency_key text NOT NULL,
+        request_hash character(64) NOT NULL,
+        decision varchar(8) NOT NULL,
+        message text NOT NULL,
+        loan_id uuid REFERENCES loans (id),
+        policy_version text NOT NULL REFERENCES state_policies (version),
+        created_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (borrower_id, idempotency_key),
+        CONSTRAINT idempotency_requests_borrower_id_valid
+          CHECK (borrower_id <> '' AND borrower_id = btrim(borrower_id)),
+        CONSTRAINT idempotency_requests_key_valid
+          CHECK (idempotency_key <> '' AND idempotency_key = btrim(idempotency_key)),
+        CONSTRAINT idempotency_requests_hash_valid
+          CHECK (request_hash ~ '^[0-9a-f]{64}$'),
+        CONSTRAINT idempotency_requests_result_valid CHECK (
+          (
+            decision = 'APPROVED'
+            AND message = 'O valor solicitado foi aprovado.'
+            AND loan_id IS NOT NULL
+          )
+          OR (
+            decision = 'DENIED'
+            AND message = 'O empréstimo foi negado.'
+            AND loan_id IS NULL
+          )
+        )
+      );
+
+      CREATE INDEX idempotency_requests_policy_version_idx
+        ON idempotency_requests (policy_version);
+    `,
+  },
 ];

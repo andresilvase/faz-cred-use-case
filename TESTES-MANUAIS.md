@@ -616,7 +616,7 @@ O comando deve terminar com exit code `0` e não deve modificar `package-lock.js
 Registre os containers PostgreSQL 17 existentes, execute somente a especificação da Tarefa 7 e confirme que nenhum container adicional permaneceu:
 
 ```bash
-before="$(docker ps -q --filter ancestor=postgres:17 | sort)"; npm test -- src/test-support/postgres-test-harness.test.ts --reporter=verbose; status=$?; after="$(docker ps -q --filter ancestor=postgres:17 | sort)"; if [ "$before" != "$after" ]; then echo "FAIL: a lista de containers postgres:17 mudou"; docker ps --filter ancestor=postgres:17; exit 1; fi; exit "$status"
+before="$(docker ps -q --filter ancestor=postgres:17 | sort)"; npm test -- src/test-support/postgres-test-harness.test.ts --reporter=verbose; test_exit_code=$?; after="$(docker ps -q --filter ancestor=postgres:17 | sort)"; if [ "$before" != "$after" ]; then echo "FAIL: a lista de containers postgres:17 mudou"; docker ps --filter ancestor=postgres:17; exit 1; fi; exit "$test_exit_code"
 ```
 
 Na primeira execução, o download da imagem pode tornar o teste mais demorado.

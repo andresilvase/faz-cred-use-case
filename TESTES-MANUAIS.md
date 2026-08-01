@@ -2161,3 +2161,169 @@ echo "PASS: testes ausentes do build de produção"
 A coleção comprova o header de correlação e preserva os contratos HTTP existentes, mas não consegue verificar sozinha o conteúdo escrito em stdout; essa evidência deve ser observada no terminal e pelas especificações automatizadas.
 
 A configuração suporta credenciais separadas, TLS verificado e redaction. A efetiva criação de usuários PostgreSQL com privilégios mínimos, a proteção das variáveis no ambiente de implantação e a retenção dos logs dependem da infraestrutura externa. O prazo de retenção permanece em aberto na PRD.
+
+## Tarefa 17 — Documentar e finalizar a entrega
+
+### Objetivo verificável
+
+Comprovar que uma pessoa sem contexto da implementação consegue, usando somente o repositório:
+
+- compreender objetivo, regra, arquitetura, persistência e fluxo transacional;
+- identificar decisões, trade-offs, limitações, itens fora do escopo e possíveis evoluções;
+- instalar as dependências a partir de um clone limpo;
+- criar um PostgreSQL vazio com credenciais separadas;
+- aplicar migrations ao iniciar o serviço;
+- executar health check e uma decisão HTTP;
+- executar testes, typecheck e build;
+- distinguir funcionalidades implementadas de itens apenas citados como fora do escopo.
+
+### Preparar um clone realmente limpo
+
+Não execute este ensaio no diretório em que você desenvolve. Crie uma pasta temporária e clone a `main`:
+
+```bash
+validation_root="$(mktemp -d)"
+git clone https://github.com/andresilvase/faz-cred-use-case.git "$validation_root/faz-cred-use-case"
+cd "$validation_root/faz-cred-use-case"
+git switch main
+git status --short
+npm ci
+```
+
+Resultado esperado:
+
+- `git status --short` não imprime nada;
+- `npm ci` termina com exit code `0`;
+- nenhum arquivo do clone original é necessário.
+
+### Conferir a completude do README
+
+Leia o `README.md` integralmente e confirme que ele contém:
+
+- visão geral e regra de concentração;
+- bootstrap e política versionada;
+- arquitetura e responsabilidades das camadas;
+- fluxo de aprovação e negativa;
+- tabelas `loans`, `exposure_aggregates`, `state_policies` e `idempotency_requests`; 
+- idempotência, concorrência e reconstrução dos agregados;
+- instalação, configuração, banco vazio, execução e testes;
+- segurança, observabilidade e separação de credenciais;
+- decisões, trade-offs, limitações, itens fora do escopo e possíveis evoluções.
+
+Como apoio, execute:
+
+```bash
+for heading in \
+  '## Visão geral' \
+  '## Arquitetura' \
+  '## Persistência' \
+  '## Contrato HTTP' \
+  '## Idempotência e concorrência' \
+  '## Executar o serviço' \
+  '## Segurança e observabilidade' \
+  '## Fora do escopo do MVP' \
+  '## Limitações conhecidas' \
+  '## Decisões e trade-offs' \
+  '## Possíveis evoluções'; do
+  grep -Fq "$heading" README.md || { echo "FAIL: seção ausente: $heading"; exit 1; }
+done
+echo 'PASS: seções obrigatórias encontradas'
+```
+
+Referências a desembolso, outbox, worker, webhook e eventos são aceitáveis somente quando apresentadas como itens fora do escopo ou não implementados. O README não pode afirmar que essas capacidades existem no MVP.
+
+### Validar banco vazio e execução
+
+Com Docker disponível e a porta 5432 livre, execute integralmente as seções `Criar um PostgreSQL local vazio`, `Configuração` e `Para executar em desenvolvimento` do README.
+
+Resultado esperado no primeiro startup:
+
+- migrations aplicadas usando `MIGRATION_DATABASE_URL`; 
+- serviço iniciado usando `DATABASE_URL`; 
+- log JSON `service.started`; 
+- nenhuma senha ou URL de conexão impressa no log;
+- `GET /health` responde `200` com `{"status":"ok"}` e `X-Correlation-Id`; 
+- o exemplo de `POST /loan-decisions` responde `200`, `APPROVED`, mensagem pública e `loan_id`; 
+- a resposta não contém `policy_version`.
+
+Confirme que as estruturas foram criadas no banco vazio:
+
+```bash
+docker exec loan-decision-postgres psql \
+  -U loan_decision_migrator \
+  -d loan_decision \
+  -v ON_ERROR_STOP=1 \
+  -c "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name"
+```
+
+A saída deve conter, no mínimo:
+
+```text
+exposure_aggregates
+idempotency_requests
+loans
+schema_migrations
+state_policies
+```
+
+Para comprovar que o usuário da aplicação não recebeu DDL, execute:
+
+```bash
+docker exec -e PGPASSWORD=local_app_password loan-decision-postgres psql \
+  -h 127.0.0.1 \
+  -U loan_decision_app \
+  -d loan_decision \
+  -c 'CREATE TABLE privilege_probe (id integer)'
+```
+
+Resultado esperado: falha `permission denied for schema public`. A tabela `privilege_probe` não deve ser criada. Esse teste demonstra a configuração local do README; privilégios de produção ainda dependem da infraestrutura de implantação.
+
+### Executar os testes e o build
+
+Depois de encerrar o serviço com `Ctrl+C`, execute:
+
+```bash
+npx vitest run src/domain
+npm test
+npm run typecheck
+npm run build
+```
+
+Todos os comandos devem terminar com exit code `0`. A suíte completa requer Docker e deve cobrir domínio, PostgreSQL, migrations, rollback, idempotência, concorrência, reconstrução, HTTP e logs.
+
+Confirme que o build não contém testes ou harnesses:
+
+```bash
+if find dist -type f | grep -E '(\.test\.js$|test-support)' >/dev/null; then
+  echo 'FAIL: teste ou harness encontrado em dist'
+  exit 1
+fi
+echo 'PASS: build de produção limpo'
+```
+
+### Verificação pelo Postman
+
+A Tarefa 17 não altera o contrato HTTP, portanto não adiciona requisições à coleção. Com o serviço e o banco do ensaio ativos, importe `Loan-Decision.postman_collection.json` e execute a coleção completa.
+
+Resultado esperado:
+
+- health check aprovado;
+- aprovação, replay, negativa, conflito e entradas inválidas aprovados;
+- `X-Correlation-Id` presente em todas as respostas;
+- nenhum contrato diverge dos exemplos do README.
+
+### Limpeza e limitações
+
+Interrompa o serviço e o container criado pelo README:
+
+```bash
+docker stop loan-decision-postgres
+```
+
+Remova o container somente se não quiser preservar o banco descartável:
+
+```bash
+docker rm loan-decision-postgres
+```
+
+O roteiro não automatiza uma revisão semântica completa da documentação: a pessoa avaliadora ainda deve confirmar que itens fora do escopo não são apresentados como implementados. Também não valida uma implantação real com TLS, gerenciador de segredos ou usuários de produção; verifica apenas que o README documenta e permite exercitar essas decisões localmente.

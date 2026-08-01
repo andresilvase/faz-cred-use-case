@@ -855,3 +855,147 @@ A política vigente é uma dependência interna da decisão e não possui endpoi
 
 Os testes acima comprovam schema, seed, constraints, leitura e reconstrução da política. Eles ainda não comprovam a transação de criação do empréstimo nem o contrato HTTP.
 
+## Tarefa 9 — Consultar e bloquear os agregados de exposição
+
+### Objetivo verificável
+
+Confirmar no PostgreSQL descartável que:
+
+- o agregado total da carteira existe desde a migration com exposição zero;
+- a linha de uma UF ainda inexistente é criada ao ser bloqueada;
+- o agregado TOTAL é bloqueado antes do agregado da UF;
+- total e UF são lidos e atualizados dentro da mesma transação;
+- um rollback desfaz tanto a criação da UF quanto as alterações de exposição;
+- o teste não deixa um container PostgreSQL adicional em execução.
+
+### Pré-requisitos
+
+Esta tarefa usa o PostgreSQL 17 descartável preparado na Tarefa 7. Confirme que o Docker está disponível:
+
+~~~bash
+docker info >/dev/null && echo "Docker disponível"
+~~~
+
+Resultado esperado:
+
+~~~text
+Docker disponível
+~~~
+
+Depois de um clone limpo:
+
+~~~bash
+npm ci
+~~~
+
+O comando deve terminar com exit code 0 sem modificar package-lock.json.
+
+### Executar a integração dos agregados de exposição
+
+Registre os containers existentes, execute somente a especificação da Tarefa 9 e confirme que nenhum PostgreSQL adicional permaneceu:
+
+~~~bash
+before="$(docker ps -q --filter ancestor=postgres:17 | sort)"; npm test -- src/infrastructure/database/postgres-exposure-repository.test.ts --reporter=verbose; test_exit_code=$?; after="$(docker ps -q --filter ancestor=postgres:17 | sort)"; if [ "$before" != "$after" ]; then echo "FAIL: a lista de containers postgres:17 mudou"; docker ps --filter ancestor=postgres:17; exit 1; fi; exit "$test_exit_code"
+~~~
+
+Resultado esperado:
+
+- exit code 0;
+- uma suíte aprovada;
+- 4 testes aprovados;
+- nenhuma falha;
+- os seguintes cenários reportados como aprovados:
+
+~~~text
+locks an empty portfolio and creates the missing UF aggregate
+reads and updates TOTAL and UF in the same transaction
+rolls back aggregate creation and updates without residual changes
+acquires the TOTAL lock before any UF lock
+~~~
+
+A comparação dos IDs de containers preserva qualquer PostgreSQL 17 que já estivesse ativo e detecta somente a permanência de um container adicional.
+
+### Evidências da carteira vazia
+
+O primeiro cenário bloqueia GO em uma carteira recém-criada e exige os seguintes registros após o commit:
+
+~~~text
+GO = 0
+TOTAL = 0
+~~~
+
+A linha de TOTAL vem do seed da migration. A linha de GO é criada pelo repositório quando a UF ainda não existe.
+
+### Evidências da atualização atômica
+
+O segundo cenário atualiza os dois agregados sob os locks da mesma transação e, em seguida, exige a releitura deste snapshot:
+
+~~~text
+totalExposure = 1500n
+ufExposure = 500n
+~~~
+
+A atualização precisa afetar exatamente as linhas de TOTAL e da UF bloqueada. A ausência de qualquer uma delas produz erro técnico explícito em vez de uma atualização parcial silenciosa.
+
+### Evidências do rollback
+
+O terceiro cenário cria e atualiza o agregado de SP, mas encerra a transação com rollback. Ao consultar o banco depois disso, a especificação exige somente:
+
+~~~text
+TOTAL = 0
+~~~
+
+A linha de SP não pode permanecer e o valor total não pode ser alterado. Isso comprova que a criação sob demanda da UF e a atualização dos agregados participam da mesma transação.
+
+### Evidências da ordem dos locks
+
+O quarto cenário mantém uma transação com os locks de TOTAL e GO. Enquanto ela está aberta, uma segunda transação tenta bloquear SP com lock_timeout de 100 ms.
+
+Resultado esperado para a segunda transação:
+
+~~~text
+PostgreSQL SQLSTATE 55P03
+~~~
+
+Embora as UFs sejam diferentes, a segunda transação deve aguardar porque ambas tentam bloquear TOTAL primeiro. O timeout comprova a ordem determinística TOTAL → UF, reduzindo o risco de deadlock entre decisões concorrentes.
+
+Este cenário valida o protocolo de locks do repositório. A garantia concorrente do fluxo completo de decisão, incluindo impedir duas aprovações incompatíveis, pertence à Tarefa 14.
+
+### Verificação completa do projeto
+
+~~~bash
+npm test
+npm run typecheck
+npm run build
+~~~
+
+Todos os comandos devem terminar com exit code 0. A suíte completa requer Docker.
+
+Após o build, confirme que o suporte de testes continua fora do artefato de produção:
+
+~~~bash
+test ! -e dist/test-support/postgres-test-harness.js && echo "Harness ausente do build de produção"
+~~~
+
+Resultado esperado:
+
+~~~text
+Harness ausente do build de produção
+~~~
+
+### Limpeza segura
+
+Os testes recriam o schema public antes de cada cenário e encerram pool e container no afterAll. Se uma execução for interrompida abruptamente, liste os containers:
+
+~~~bash
+docker ps --filter ancestor=postgres:17
+~~~
+
+Não interrompa containers preexistentes. Remova somente um container comprovadamente criado pela execução interrompida.
+
+### Por que a Tarefa 9 não está no Postman
+
+A tarefa implementa persistência e locks internos, sem acrescentar endpoint HTTP. A coleção Postman continua apenas com o health check. Expor os agregados ou seus locks por uma rota artificial anteciparia uma interface inexistente e revelaria detalhes internos indevidos.
+
+Os testes acima comprovam schema, criação sob demanda, leitura, atualização, rollback e ordem dos locks. Eles ainda não comprovam o fluxo transacional completo da decisão nem o contrato HTTP.
+

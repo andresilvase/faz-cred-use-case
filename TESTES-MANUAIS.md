@@ -1169,3 +1169,173 @@ A aprovação atômica foi implementada como caso de uso da aplicação e transa
 
 Adicionar uma requisição agora representaria uma interface HTTP inexistente. Os testes manuais desta tarefa são, portanto, executados pela especificação de integração contra um PostgreSQL descartável.
 
+## Tarefa 11 — Processar uma negativa sem criar empréstimo
+
+### Objetivo verificável
+
+Confirmar no PostgreSQL descartável que:
+
+- uma solicitação que viola a política retorna uma negativa de negócio;
+- a negativa não cria registro em loans;
+- a negativa não modifica os agregados TOTAL e da UF;
+- um empréstimo aprovado anteriormente permanece intacto;
+- o resultado interno da negativa contém a versão da política aplicada;
+- uma falha técnica continua distinta de uma negativa;
+- o teste não deixa um container PostgreSQL adicional em execução.
+
+### Pré-requisitos
+
+Esta tarefa usa o PostgreSQL 17 descartável preparado na Tarefa 7. Confirme que o Docker está disponível:
+
+~~~bash
+docker info >/dev/null && echo "Docker disponível"
+~~~
+
+Resultado esperado:
+
+~~~text
+Docker disponível
+~~~
+
+Depois de um clone limpo:
+
+~~~bash
+npm ci
+~~~
+
+O comando deve terminar com exit code 0 sem modificar package-lock.json.
+
+### Executar a integração do caminho de negativa
+
+Registre os containers existentes, execute a especificação que agora cobre aprovação e negativa e confirme que nenhum PostgreSQL adicional permaneceu:
+
+~~~bash
+before="$(docker ps -q --filter ancestor=postgres:17 | sort)"; npm test -- src/application/persist-approved-loan.test.ts --reporter=verbose; test_exit_code=$?; after="$(docker ps -q --filter ancestor=postgres:17 | sort)"; if [ "$before" != "$after" ]; then echo "FAIL: a lista de containers postgres:17 mudou"; docker ps --filter ancestor=postgres:17; exit 1; fi; exit "$test_exit_code"
+~~~
+
+Resultado esperado:
+
+- exit code 0;
+- uma suíte aprovada;
+- 4 testes aprovados;
+- nenhuma falha;
+- o novo cenário reportado como aprovado:
+
+~~~text
+returns a denied decision without creating a loan or changing prior exposure
+~~~
+
+Os três cenários da Tarefa 10 também devem continuar aprovados. A comparação dos IDs preserva qualquer PostgreSQL 17 que já estivesse ativo e detecta somente a permanência de um container adicional.
+
+### Dados usados para formar a exposição anterior
+
+O cenário primeiro aprova para GO:
+
+~~~text
+borrower_id = borrower-approved
+amount_minor_units = 1000000
+policy_version = 1
+~~~
+
+Depois dessa aprovação, a carteira deve conter:
+
+~~~text
+quantidade de loans = 1
+GO = 1000000
+TOTAL = 1000000
+~~~
+
+Essa aprovação anterior funciona como referência para detectar qualquer efeito indevido causado pela negativa seguinte.
+
+### Dados e resultado da negativa
+
+Com a política inicial, o cenário tenta uma segunda solicitação para GO:
+
+~~~text
+borrower_id = borrower-denied
+amount_minor_units = 1
+~~~
+
+A carteira já possui R$ 10.000,00 concentrados em GO. Acrescentar um centavo ultrapassaria o limite de bootstrap de GO, portanto o resultado interno esperado é exatamente:
+
+~~~text
+decision = DENIED
+message = O empréstimo foi negado.
+policyVersion = 1
+loanId ausente
+~~~
+
+A negativa é um resultado válido de negócio. Ela não deve ser lançada como exceção técnica.
+
+### Evidências de ausência de efeitos
+
+Depois da negativa, o banco deve continuar com:
+
+~~~text
+quantidade de loans = 1
+GO = 1000000
+TOTAL = 1000000
+~~~
+
+O único empréstimo é a aprovação anterior. Não pode existir empréstimo para borrower-denied, e os agregados não podem aumentar em um centavo.
+
+A linha de GO já existia por causa da aprovação anterior. Portanto, este cenário comprova preservação de uma exposição real existente, além da ausência de INSERT e UPDATE no caminho negado.
+
+### Negativa de negócio versus falha técnica
+
+O resultado DENIED acima deve ser retornado normalmente com a versão da política. Em contraste, o cenário de rollback já presente na mesma suíte força uma falha no PostgreSQL e exige a propagação da mensagem:
+
+~~~text
+forced exposure update failure
+~~~
+
+Nesse caso, a operação rejeita e o banco executa rollback. Essa diferença comprova que uma violação da política não é tratada como indisponibilidade ou erro técnico.
+
+### Escopo comprovado e limitação
+
+A suíte comprova o caminho transacional de negativa, a ausência de empréstimo, a preservação dos agregados e a distinção em relação a uma falha técnica injetada. Ela ainda não comprova:
+
+- persistência idempotente da resposta negada, pertencente à Tarefa 12;
+- resposta HTTP 200 para DENIED, pertencente à Tarefa 13;
+- comportamento sob solicitações simultâneas, pertencente à Tarefa 14.
+
+A versão da política aparece no resultado interno, mas ainda não existe registro próprio de uma negativa no banco. A persistência desse resultado ocorrerá com idempotency_requests na Tarefa 12.
+
+### Verificação completa do projeto
+
+~~~bash
+npm test
+npm run typecheck
+npm run build
+~~~
+
+Todos os comandos devem terminar com exit code 0. A suíte completa requer Docker.
+
+Após o build, confirme que o suporte de testes continua fora do artefato de produção:
+
+~~~bash
+test ! -e dist/test-support/postgres-test-harness.js && echo "Harness ausente do build de produção"
+~~~
+
+Resultado esperado:
+
+~~~text
+Harness ausente do build de produção
+~~~
+
+### Limpeza segura
+
+Os testes recriam o schema public antes de cada cenário e encerram pool e container no afterAll. Se uma execução for interrompida abruptamente, liste os containers:
+
+~~~bash
+docker ps --filter ancestor=postgres:17
+~~~
+
+Não interrompa containers preexistentes. Remova somente um container comprovadamente criado pela execução interrompida.
+
+### Por que a Tarefa 11 não está no Postman
+
+O caminho de negativa foi implementado no caso de uso da aplicação e na transação PostgreSQL, mas ainda não está conectado ao Express. O endpoint POST /loan-decisions está previsto para a Tarefa 13.
+
+Adicionar uma requisição Postman agora representaria uma interface HTTP inexistente. A resposta pública 200 com decision igual a DENIED somente poderá ser validada no Postman quando a rota existir.
+

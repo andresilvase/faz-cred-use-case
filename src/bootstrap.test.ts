@@ -12,7 +12,14 @@ describe("service lifecycle", () => {
   });
 
   it("starts accepting connections and shuts down cleanly", async () => {
-    service = await startService({ port: 0 });
+    service = await startService(
+      { port: 0 },
+      {
+        execute: async () => {
+          throw new Error("loan decisions are not used in this test");
+        },
+      },
+    );
 
     expect(service.listening).toBe(true);
 

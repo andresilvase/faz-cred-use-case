@@ -19,6 +19,20 @@ describe("loadConfig", () => {
   );
 
   it("accepts a valid PORT value", () => {
-    expect(loadConfig({ PORT: "3000" })).toEqual({ port: 3000 });
-  })
+    expect(
+      loadConfig({
+        PORT: "3000",
+        DATABASE_URL: "postgresql://localhost/loan_decision",
+      }),
+    ).toEqual({
+      port: 3000,
+      databaseUrl: "postgresql://localhost/loan_decision",
+    });
+  });
+
+  it("fails explicitly when DATABASE_URL is absent", () => {
+    expect(() => loadConfig({ PORT: "3000" })).toThrowError(
+      "Missing required environment variable: DATABASE_URL",
+    );
+  });
 });

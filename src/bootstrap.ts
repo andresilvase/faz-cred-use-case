@@ -1,11 +1,20 @@
 import { once } from "node:events";
 import type { Server } from "node:http";
 
-import type { ServiceConfig } from "./infrastructure/config/load-config.js";
-import { createApp } from "./interfaces/http/create-app.js";
+import {
+  createApp,
+  type LoanDecisionProcessor,
+} from "./interfaces/http/create-app.js";
 
-export async function startService(config: ServiceConfig): Promise<Server> {
-  const server = createApp().listen(config.port);
+export interface HttpServiceConfig {
+  readonly port: number;
+}
+
+export async function startService(
+  config: HttpServiceConfig,
+  loanDecisions: LoanDecisionProcessor,
+): Promise<Server> {
+  const server = createApp(loanDecisions).listen(config.port);
 
   await once(server, "listening");
 

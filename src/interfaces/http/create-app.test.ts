@@ -12,7 +12,11 @@ describe("GET /health", () => {
   });
 
   it("reports that the service is healthy", async () => {
-    const server = createApp().listen(0, "127.0.0.1");
+    const server = createApp({
+      execute: async () => {
+        throw new Error("loan decisions are not used in this test");
+      },
+    }).listen(0, "127.0.0.1");
     closeServer = () =>
       new Promise((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));

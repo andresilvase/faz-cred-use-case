@@ -1,5 +1,6 @@
 export interface ServiceConfig {
-  port: number;
+  readonly port: number;
+  readonly databaseUrl: string;
 }
 
 export function loadConfig(environment: NodeJS.ProcessEnv): ServiceConfig {
@@ -17,5 +18,11 @@ export function loadConfig(environment: NodeJS.ProcessEnv): ServiceConfig {
     );
   }
 
-  return { port: parsedPort };
+  const databaseUrl = environment.DATABASE_URL;
+
+  if (databaseUrl === undefined || databaseUrl.trim() === "") {
+    throw new Error("Missing required environment variable: DATABASE_URL");
+  }
+
+  return { port: parsedPort, databaseUrl };
 }

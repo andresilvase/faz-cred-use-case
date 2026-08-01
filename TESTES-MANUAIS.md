@@ -1948,3 +1948,94 @@ A Tarefa 14 não altera o contrato HTTP. Runners comuns do Postman executam requ
 
 A coleção da Tarefa 13 continua válida para o contrato público. A segurança concorrente deve ser verificada pelas duas suítes de integração contra PostgreSQL real.
 
+## Tarefa 15 — Reconstruir os agregados de exposição
+
+### Objetivo verificável
+
+Confirmar que a operação interna de reconstrução:
+
+- trata `loans` como a fonte oficial da exposição;
+- recria somente o agregado `TOTAL = 0` quando a carteira está vazia;
+- reproduz os valores de múltiplas UFs e mantém `TOTAL` igual à soma dos empréstimos;
+- detecta e corrige agregados divergentes;
+- recompõe integralmente `exposure_aggregates` depois que seus registros são descartados;
+- executa tudo em uma transação e não deixa um estado parcialmente reconstruído.
+
+### Preparação
+
+Esta tarefa usa Testcontainers e requer Docker em execução. Faça a validação em uma cópia de trabalho sem outros agentes, testes ou comandos de Docker concorrentes, pois eles podem alterar temporariamente a lista de containers ou o estado do Git.
+
+```bash
+docker info >/dev/null
+```
+
+O comando deve terminar com exit code `0`.
+
+### Executar os quatro cenários da reconstrução
+
+O comando abaixo registra os containers PostgreSQL 17 preexistentes, executa somente a suíte da Tarefa 15 e aguarda por até dez segundos o cleanup assíncrono do Testcontainers. Os nomes das variáveis são compatíveis com Bash e Zsh.
+
+```bash
+before_containers="$(docker ps -q --filter ancestor=postgres:17 | sort)"
+npm test -- src/infrastructure/database/postgres-exposure-rebuilder.test.ts --reporter=verbose
+test_exit_code=$?
+
+attempts=0
+after_containers="$(docker ps -q --filter ancestor=postgres:17 | sort)"
+while [ "$before_containers" != "$after_containers" ] && [ "$attempts" -lt 20 ]; do
+  sleep 0.5
+  attempts=$((attempts + 1))
+  after_containers="$(docker ps -q --filter ancestor=postgres:17 | sort)"
+done
+
+if [ "$before_containers" != "$after_containers" ]; then
+  echo "FAIL: a lista de containers postgres:17 não voltou ao estado inicial"
+  docker ps --filter ancestor=postgres:17
+  exit 1
+fi
+
+exit "$test_exit_code"
+```
+
+Resultado esperado:
+
+- uma suíte aprovada;
+- quatro testes aprovados;
+- exit code final `0`;
+- nenhum container PostgreSQL 17 adicional permanece após a tolerância de cleanup.
+
+Os quatro cenários devem comprovar:
+
+1. carteira vazia: `exposure_aggregates` contém apenas `TOTAL = 0`;
+2. múltiplas UFs: BA, GO e SP são reconstruídas a partir de `loans`, com `TOTAL` igual à soma;
+3. divergência: valores propositalmente corrompidos são detectados e substituídos pelos valores oficiais;
+4. descarte completo: a tabela de agregados vazia é reproduzida integralmente.
+
+### Verificação completa do projeto
+
+```bash
+npm test
+npm run typecheck
+npm run build
+```
+
+Todos os comandos devem terminar com exit code `0`.
+
+Para confirmar que o harness de integração não entrou no artefato de produção:
+
+```bash
+if find dist -type f | grep -E '(postgres-exposure-rebuilder\.test|test-database)' >/dev/null; then
+  echo "FAIL: harness de teste encontrado em dist"
+  exit 1
+fi
+
+echo "PASS: harness ausente do build de produção"
+```
+
+### Segurança operacional e limitações
+
+A reconstrução é uma operação administrativa interna, sem endpoint HTTP público. Por isso, a coleção Postman não recebe requisições nesta tarefa.
+
+A implementação adquire lock `ACCESS EXCLUSIVE` em `exposure_aggregates` e lock `SHARE` em `loans`. Isso oferece uma visão consistente enquanto os agregados são apagados e recriados, mas bloqueia decisões e escritas concorrentes. Execute a reconstrução em janela controlada e de baixo tráfego.
+
+Neste incremento, a operação é acessível pela classe interna `PostgresExposureRebuilder` e validada pela suíte de integração; não existe ainda um comando CLI ou endpoint administrativo para acioná-la em produção. O roteiro comprova os resultados funcionais exigidos, mas não injeta uma falha intermediária para observar o rollback.

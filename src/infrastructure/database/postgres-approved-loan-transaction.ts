@@ -12,6 +12,10 @@ import type {
   BorrowerId,
   LoanDecisionInput,
 } from "../../domain/loan-decision-input.js";
+import {
+  NOOP_TECHNICAL_LOGGER,
+  type TechnicalLogger,
+} from "../logging/technical-logger.js";
 import { PostgresConcentrationPolicyRepository } from "./postgres-concentration-policy-repository.js";
 import { PostgresExposureRepository } from "./postgres-exposure-repository.js";
 
@@ -24,6 +28,7 @@ export interface PostgresTransactionOptions {
   readonly lockTimeoutMs?: number;
   readonly maxRetries?: number;
   readonly retryDelayMs?: number;
+  readonly logger?: TechnicalLogger;
 }
 
 export class PostgresApprovedLoanTransaction
@@ -32,6 +37,7 @@ export class PostgresApprovedLoanTransaction
   private readonly lockTimeoutMs: number;
   private readonly maxRetries: number;
   private readonly retryDelayMs: number;
+  private readonly logger: TechnicalLogger;
 
   constructor(
     private readonly pool: Pool,
@@ -40,6 +46,7 @@ export class PostgresApprovedLoanTransaction
     this.lockTimeoutMs = options.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
     this.maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
     this.retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
+    this.logger = options.logger ?? NOOP_TECHNICAL_LOGGER;
   }
 
   async run<T>(
@@ -53,9 +60,17 @@ export class PostgresApprovedLoanTransaction
           retryCount >= this.maxRetries ||
           !isRetryableTransactionError(error)
         ) {
+          this.logger.error("database.transaction_failed", error, {
+            attempt: retryCount + 1,
+            sqlstate: postgresErrorCode(error),
+          });
           throw error;
         }
 
+        this.logger.warn("database.transaction_retry", {
+          attempt: retryCount + 1,
+          sqlstate: postgresErrorCode(error),
+        });
         await wait(this.retryDelayMs * 2 ** retryCount);
       }
     }
@@ -64,7 +79,14 @@ export class PostgresApprovedLoanTransaction
   private async runAttempt<T>(
     operation: (transaction: ApprovedLoanTransaction) => Promise<T>,
   ): Promise<T> {
-    const client = await this.pool.connect();
+    let client: PoolClient;
+
+    try {
+      client = await this.pool.connect();
+    } catch (error) {
+      this.logger.error("database.connection_failed", error);
+      throw error;
+    }
 
     try {
       await client.query("BEGIN");
@@ -77,20 +99,34 @@ export class PostgresApprovedLoanTransaction
       );
       const result = await operation({
         findIdempotencyRequest: (borrowerId, idempotencyKey) =>
-          findIdempotencyRequest(client, borrowerId, idempotencyKey),
-        lockExposure: (uf) => exposureRepository.lockFor(uf),
-        loadActivePolicy: () => policyRepository.loadActive(),
+          logQueryFailure(this.logger, "idempotency.find", () =>
+            findIdempotencyRequest(client, borrowerId, idempotencyKey),
+          ),
+        lockExposure: (uf) =>
+          logQueryFailure(this.logger, "exposure.lock", () =>
+            exposureRepository.lockFor(uf),
+          ),
+        loadActivePolicy: () =>
+          logQueryFailure(this.logger, "policy.load_active", () =>
+            policyRepository.loadActive(),
+          ),
         insertLoan: async (input, policyVersion) => {
           const loanId = randomUUID();
 
-          await insertLoan(client, loanId, input, policyVersion);
+          await logQueryFailure(this.logger, "loan.insert", () =>
+            insertLoan(client, loanId, input, policyVersion),
+          );
 
           return loanId;
         },
         updateExposure: (uf, exposure) =>
-          exposureRepository.updateLocked(uf, exposure),
+          logQueryFailure(this.logger, "exposure.update", () =>
+            exposureRepository.updateLocked(uf, exposure),
+          ),
         saveIdempotencyRequest: (request) =>
-          saveIdempotencyRequest(client, request),
+          logQueryFailure(this.logger, "idempotency.insert", () =>
+            saveIdempotencyRequest(client, request),
+          ),
       });
 
       await client.query("COMMIT");
@@ -105,14 +141,39 @@ export class PostgresApprovedLoanTransaction
   }
 }
 
-function isRetryableTransactionError(error: unknown): boolean {
-  return (
+async function logQueryFailure<T>(
+  logger: TechnicalLogger,
+  operation: string,
+  query: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await query();
+  } catch (error) {
+    logger.error("database.query_failed", error, {
+      operation,
+      sqlstate: postgresErrorCode(error),
+    });
+    throw error;
+  }
+}
+
+function postgresErrorCode(error: unknown): string | undefined {
+  if (
     typeof error === "object" &&
     error !== null &&
     "code" in error &&
-    typeof error.code === "string" &&
-    RETRYABLE_TRANSACTION_CODES.has(error.code)
-  );
+    typeof error.code === "string"
+  ) {
+    return error.code;
+  }
+
+  return undefined;
+}
+
+function isRetryableTransactionError(error: unknown): boolean {
+  const code = postgresErrorCode(error);
+
+  return code !== undefined && RETRYABLE_TRANSACTION_CODES.has(code);
 }
 
 async function wait(milliseconds: number): Promise<void> {

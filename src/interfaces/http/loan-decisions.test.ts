@@ -16,13 +16,33 @@ describe("POST /loan-decisions", () => {
   let harness: PostgresTestHarness;
   let server: Server;
   let baseUrl: string;
+  const logRecords: Record<string, unknown>[] = [];
+  const logger = {
+    info: (event: string, fields: Record<string, unknown> = {}) => {
+      logRecords.push({ level: "info", event, ...fields });
+    },
+    warn: (event: string, fields: Record<string, unknown> = {}) => {
+      logRecords.push({ level: "warn", event, ...fields });
+    },
+    error: (
+      event: string,
+      error: unknown,
+      fields: Record<string, unknown> = {},
+    ) => {
+      logRecords.push({ level: "error", event, error, ...fields });
+    },
+  };
 
   beforeAll(async () => {
     harness = await startPostgresTestHarness();
     server = createApp(
       new PersistApprovedLoan(
-        new PostgresApprovedLoanTransaction(harness.pool),
+        new PostgresApprovedLoanTransaction(harness.pool, { logger }),
       ),
+      {
+        logger,
+        createCorrelationId: () => "test-correlation-id",
+      },
     ).listen(0, "127.0.0.1");
     await new Promise<void>((resolve) => server.once("listening", resolve));
     const { port } = server.address() as AddressInfo;
@@ -30,6 +50,7 @@ describe("POST /loan-decisions", () => {
   }, 60_000);
 
   beforeEach(async () => {
+    logRecords.length = 0;
     await harness.reset();
     await runMigrations(harness.pool);
   });
@@ -56,10 +77,22 @@ describe("POST /loan-decisions", () => {
     });
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("X-Correlation-Id")).toBe(
+      "test-correlation-id",
+    );
     expect(await response.json()).toEqual({
       decision: "APPROVED",
       message: "O valor solicitado foi aprovado.",
       loan_id: expect.any(String),
+    });
+    expect(logRecords).toContainEqual({
+      level: "info",
+      event: "http.request_completed",
+      correlation_id: "test-correlation-id",
+      method: "POST",
+      route: "/loan-decisions",
+      status: 200,
+      duration_ms: expect.any(Number),
     });
   });
 
@@ -125,6 +158,31 @@ describe("POST /loan-decisions", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Invalid request",
     });
+  });
+
+  it("logs validation failures without sensitive request data", async () => {
+    const response = await postLoanDecision(
+      baseUrl,
+      {
+        borrower_id: " sensitive-borrower ",
+        uf: "GO",
+        amount: 1,
+      },
+      "sensitive-idempotency-key",
+    );
+
+    expect(response.status).toBe(400);
+    expect(logRecords).toContainEqual({
+      level: "warn",
+      event: "http.validation_failed",
+      correlation_id: "test-correlation-id",
+      method: "POST",
+      route: "/loan-decisions",
+      field: "borrowerId",
+    });
+    const serializedLogs = JSON.stringify(logRecords);
+    expect(serializedLogs).not.toContain("sensitive-borrower");
+    expect(serializedLogs).not.toContain("sensitive-idempotency-key");
   });
 
   it.each(["", "   "])(
@@ -208,6 +266,23 @@ describe("POST /loan-decisions", () => {
     expect(JSON.parse(responseBody)).toEqual({ error: "Internal server error" });
     expect(responseBody).not.toContain("exposure_aggregates");
     expect(responseBody).not.toContain("PostgreSQL");
+    expect(logRecords).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          level: "error",
+          event: "database.query_failed",
+        }),
+        expect.objectContaining({
+          level: "error",
+          event: "database.transaction_failed",
+        }),
+        expect.objectContaining({
+          level: "error",
+          event: "http.request_failed",
+          correlation_id: "test-correlation-id",
+        }),
+      ]),
+    );
   });
 });
 

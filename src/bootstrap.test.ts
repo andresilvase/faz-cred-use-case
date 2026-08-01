@@ -4,6 +4,12 @@ import { startService, stopService } from "./bootstrap.js";
 
 describe("service lifecycle", () => {
   let service: Awaited<ReturnType<typeof startService>> | undefined;
+  const events: string[] = [];
+  const logger = {
+    info: (event: string) => events.push(event),
+    warn: () => undefined,
+    error: () => undefined,
+  };
 
   afterEach(async () => {
     if (service?.listening) {
@@ -12,6 +18,7 @@ describe("service lifecycle", () => {
   });
 
   it("starts accepting connections and shuts down cleanly", async () => {
+    events.length = 0;
     service = await startService(
       { port: 0 },
       {
@@ -19,12 +26,14 @@ describe("service lifecycle", () => {
           throw new Error("loan decisions are not used in this test");
         },
       },
+      { logger },
     );
 
     expect(service.listening).toBe(true);
 
-    await stopService(service);
+    await stopService(service, logger);
 
     expect(service.listening).toBe(false);
+    expect(events).toEqual(["service.started", "service.stopped"]);
   });
 });

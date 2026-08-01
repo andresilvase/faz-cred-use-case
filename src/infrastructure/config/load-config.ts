@@ -1,6 +1,10 @@
 export interface ServiceConfig {
   readonly port: number;
   readonly databaseUrl: string;
+  readonly migrationDatabaseUrl: string;
+  readonly databaseSslMode: "disable" | "verify-full";
+  readonly databaseSslCa?: string;
+  readonly nodeEnvironment: "development" | "test" | "production";
 }
 
 export function loadConfig(environment: NodeJS.ProcessEnv): ServiceConfig {
@@ -24,5 +28,49 @@ export function loadConfig(environment: NodeJS.ProcessEnv): ServiceConfig {
     throw new Error("Missing required environment variable: DATABASE_URL");
   }
 
-  return { port: parsedPort, databaseUrl };
+  const migrationDatabaseUrl = environment.MIGRATION_DATABASE_URL;
+  const databaseSslMode = environment.DATABASE_SSL_MODE;
+
+  if (
+    migrationDatabaseUrl === undefined ||
+    migrationDatabaseUrl.trim() === ""
+  ) {
+    throw new Error(
+      "Missing required environment variable: MIGRATION_DATABASE_URL",
+    );
+  }
+
+  if (databaseSslMode === undefined || databaseSslMode.trim() === "") {
+    throw new Error("Missing required environment variable: DATABASE_SSL_MODE");
+  }
+  if (databaseSslMode !== "disable" && databaseSslMode !== "verify-full") {
+    throw new Error(
+      "Invalid environment variable DATABASE_SSL_MODE: expected disable or verify-full",
+    );
+  }
+
+  const nodeEnvironment = environment.NODE_ENV ?? "production";
+
+  if (
+    nodeEnvironment !== "development" &&
+    nodeEnvironment !== "test" &&
+    nodeEnvironment !== "production"
+  ) {
+    throw new Error(
+      "Invalid environment variable NODE_ENV: expected development, test or production",
+    );
+  }
+
+  const databaseSslCa = environment.DATABASE_SSL_CA;
+
+  return {
+    port: parsedPort,
+    databaseUrl,
+    migrationDatabaseUrl,
+    databaseSslMode,
+    nodeEnvironment,
+    ...(databaseSslCa === undefined || databaseSslCa === ""
+      ? {}
+      : { databaseSslCa }),
+  };
 }

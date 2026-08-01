@@ -1635,7 +1635,7 @@ until docker exec loan-decision-manual-postgres pg_isready -U loan_decision -d l
 Inicie o serviço em outro terminal:
 
 ~~~bash
-PORT=3000 DATABASE_URL=postgresql://loan_decision:loan_decision@localhost:5432/loan_decision npm run dev
+PORT=3000 DATABASE_URL=postgresql://loan_decision:loan_decision@localhost:5432/loan_decision MIGRATION_DATABASE_URL=postgresql://loan_decision:loan_decision@localhost:5432/loan_decision DATABASE_SSL_MODE=disable NODE_ENV=development npm run dev
 ~~~
 
 A aplicação deve aplicar as migrations e responder HTTP 200 em http://localhost:3000/health. Se a porta 5432 estiver ocupada, publique outra porta e ajuste DATABASE_URL.
@@ -2039,3 +2039,125 @@ A reconstrução é uma operação administrativa interna, sem endpoint HTTP pú
 A implementação adquire lock `ACCESS EXCLUSIVE` em `exposure_aggregates` e lock `SHARE` em `loans`. Isso oferece uma visão consistente enquanto os agregados são apagados e recriados, mas bloqueia decisões e escritas concorrentes. Execute a reconstrução em janela controlada e de baixo tráfego.
 
 Neste incremento, a operação é acessível pela classe interna `PostgresExposureRebuilder` e validada pela suíte de integração; não existe ainda um comando CLI ou endpoint administrativo para acioná-la em produção. O roteiro comprova os resultados funcionais exigidos, mas não injeta uma falha intermediária para observar o rollback.
+
+## Tarefa 16 — Adicionar logs técnicos e proteções de infraestrutura
+
+### Objetivo verificável
+
+Confirmar que:
+
+- inicialização, encerramento e requisições produzem logs técnicos estruturados;
+- toda resposta HTTP contém `X-Correlation-Id`; 
+- o log de requisição contém `correlation_id`, método, rota, status e duração;
+- falhas de validação e PostgreSQL são registradas sem payload, dados pessoais, segredo ou `Idempotency-Key` em texto aberto;
+- mensagens internas do banco não aparecem na resposta HTTP 500;
+- stack traces aparecem somente quando habilitados fora de produção;
+- TLS verificado pode ser configurado e o modo sem TLS exige escolha explícita;
+- migrations e runtime aceitam credenciais separadas.
+
+### Pré-requisitos
+
+- Node.js 24;
+- Docker em execução para a suíte HTTP com PostgreSQL real;
+- dependências instaladas com `npm ci`.
+
+```bash
+docker info >/dev/null && echo "Docker disponível"
+```
+
+### Executar as especificações da tarefa
+
+Faça a validação sem outros agentes ou testes concorrentes. O comando aguarda por até dez segundos o cleanup assíncrono do Testcontainers.
+
+```bash
+before_containers="$(docker ps -q --filter ancestor=postgres:17 | sort)"
+npm test -- src/bootstrap.test.ts src/infrastructure/config/load-config.test.ts src/infrastructure/database/postgres-connection.test.ts src/infrastructure/logging/technical-logger.test.ts src/interfaces/http/loan-decisions.test.ts --reporter=verbose
+test_exit_code=$?
+
+attempts=0
+after_containers="$(docker ps -q --filter ancestor=postgres:17 | sort)"
+while [ "$before_containers" != "$after_containers" ] && [ "$attempts" -lt 20 ]; do
+  sleep 0.5
+  attempts=$((attempts + 1))
+  after_containers="$(docker ps -q --filter ancestor=postgres:17 | sort)"
+done
+
+if [ "$before_containers" != "$after_containers" ]; then
+  echo "FAIL: a lista de containers postgres:17 não voltou ao estado inicial"
+  docker ps --filter ancestor=postgres:17
+  exit 1
+fi
+
+exit "$test_exit_code"
+```
+
+Resultado esperado:
+
+- cinco suítes aprovadas;
+- nenhum teste reprovado;
+- exit code final `0`;
+- nenhum container PostgreSQL 17 adicional permanece;
+- os testes confirmam redaction, stack condicional, TLS, credenciais separadas, logs de falha e resposta HTTP genérica.
+
+### Validar pelo Postman e observar os logs
+
+Use o PostgreSQL local e o comando de inicialização atualizado na Tarefa 13. Para ambiente local, `DATABASE_SSL_MODE=disable` é uma escolha explícita; não a reproduza em uma conexão de produção.
+
+Com o serviço em execução:
+
+1. reimporte `Loan-Decision.postman_collection.json`;
+2. execute `Service health / GET /health`;
+3. execute a pasta `Loan decisions`;
+4. confirme que a asserção global `returns a correlation identifier` passa em todas as respostas;
+5. observe no terminal uma linha JSON `http.request_completed` para cada chamada.
+
+Cada log de conclusão deve conter, no mínimo:
+
+```json
+{
+  "level": "info",
+  "event": "http.request_completed",
+  "correlation_id": "<UUID>",
+  "method": "POST",
+  "route": "/loan-decisions",
+  "status": 200,
+  "duration_ms": 1
+}
+```
+
+O valor de `duration_ms` varia. O `correlation_id` do log deve ser igual ao header `X-Correlation-Id` da respectiva resposta.
+
+Execute `Invalid body` e procure nos logs por `http.validation_failed`. O log não pode reproduzir `borrower_id`, o payload completo nem a `Idempotency-Key` enviada.
+
+### TLS e separação de credenciais
+
+Os testes de configuração comprovam que `DATABASE_SSL_MODE` aceita somente `disable` ou `verify-full`. Em produção, use `verify-full` e forneça a CA confiável por `DATABASE_SSL_CA` quando necessário.
+
+`DATABASE_URL` pertence ao usuário de runtime. `MIGRATION_DATABASE_URL` pertence ao usuário autorizado a aplicar migrations. A implementação permite URLs distintas, mas o teste local da Tarefa 13 reutiliza a mesma credencial por simplicidade; isso não comprova menor privilégio no ambiente implantado.
+
+### Verificação completa
+
+```bash
+npm test
+npm run typecheck
+npm run build
+```
+
+Todos os comandos devem terminar com exit code `0`.
+
+Para confirmar que testes e harnesses não entraram no build:
+
+```bash
+if find dist -type f | grep -E '(\.test\.js$|test-support)' >/dev/null; then
+  echo "FAIL: arquivo de teste encontrado em dist"
+  exit 1
+fi
+
+echo "PASS: testes ausentes do build de produção"
+```
+
+### Limitações
+
+A coleção comprova o header de correlação e preserva os contratos HTTP existentes, mas não consegue verificar sozinha o conteúdo escrito em stdout; essa evidência deve ser observada no terminal e pelas especificações automatizadas.
+
+A configuração suporta credenciais separadas, TLS verificado e redaction. A efetiva criação de usuários PostgreSQL com privilégios mínimos, a proteção das variáveis no ambiente de implantação e a retenção dos logs dependem da infraestrutura externa. O prazo de retenção permanece em aberto na PRD.

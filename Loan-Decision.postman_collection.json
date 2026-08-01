@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "d79a5a34-6ac8-49c5-bf64-bdfd4931f371",
     "name": "Loan Decision",
-    "description": "Coleção incremental dos comportamentos HTTP do Loan Decision. Execute a pasta Loan decisions na ordem apresentada; detalhes internos estão em TESTES-MANUAIS.md.",
+    "description": "Coleção incremental do serviço Loan Decision. Todas as respostas expõem X-Correlation-Id para correlação técnica.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -570,6 +570,20 @@
       "key": "denied_response",
       "value": "",
       "type": "string"
+    }
+  ],
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test(\"returns a correlation identifier\", function () {",
+          "  const correlationId = pm.response.headers.get(\"X-Correlation-Id\");",
+          "  pm.expect(correlationId).to.be.a(\"string\").and.not.empty;",
+          "});"
+        ]
+      }
     }
   ]
 }

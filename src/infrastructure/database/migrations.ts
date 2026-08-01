@@ -91,4 +91,35 @@ export const MIGRATIONS: readonly Migration[] = [
       VALUES ('TOTAL');
     `,
   },
+  {
+    version: "0004_create_loans",
+    sql: `
+      CREATE TABLE loans (
+        id uuid PRIMARY KEY,
+        borrower_id text NOT NULL,
+        uf character(2) NOT NULL,
+        amount_minor_units bigint NOT NULL,
+        policy_version text NOT NULL
+          REFERENCES state_policies (version),
+        created_at timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT loans_borrower_id_valid
+          CHECK (borrower_id <> '' AND borrower_id = btrim(borrower_id)),
+        CONSTRAINT loans_uf_valid CHECK (
+          uf IN (
+            'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO',
+            'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI',
+            'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'
+          )
+        ),
+        CONSTRAINT loans_amount_valid CHECK (
+          amount_minor_units > 0
+          AND amount_minor_units <= 9007199254740991
+        )
+      );
+
+      CREATE INDEX loans_borrower_id_idx ON loans (borrower_id);
+      CREATE INDEX loans_uf_idx ON loans (uf);
+      CREATE INDEX loans_policy_version_idx ON loans (policy_version);
+    `,
+  },
 ];

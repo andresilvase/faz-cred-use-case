@@ -67,6 +67,15 @@ O código é organizado para manter regras de negócio independentes de HTTP e P
 | Interface HTTP | Valida o contrato, traduz erros e serializa respostas |
 | Infraestrutura | PostgreSQL, migrations, locks, repositórios e logs técnicos |
 
+```text
+src/
+├── domain/          # invariantes, política e decisão pura
+├── application/     # caso de uso, idempotência e contrato transacional
+├── interfaces/http/ # Express, validação e contrato público
+├── infrastructure/  # PostgreSQL, migrations, configuração e logs
+└── test-support/     # PostgreSQL descartável para testes de integração
+```
+
 ### Fluxo transacional
 
 1. Receber `borrower_id`, `uf`, `amount` e `Idempotency-Key`.
@@ -81,7 +90,7 @@ O código é organizado para manter regras de negócio independentes de HTTP e P
 10. Em caso de aprovação, criar o empréstimo e atualizar os agregados no mesmo commit.
 11. Em caso de negativa, concluir sem criar empréstimo ou modificar a exposição.
 
-Nenhuma chamada externa deve acontecer dentro da transação.
+Qualquer falha provoca rollback do conjunto inteiro. Nenhuma chamada externa acontece dentro da transação.
 
 ## Persistência
 
@@ -129,7 +138,14 @@ Resposta de negativa:
 }
 ```
 
-Uma negativa por concentração é uma resposta de negócio válida e retorna `200 OK`. `policy_version` é persistida internamente, mas não é retornada ao cliente.
+Uma negativa por concentração é uma resposta de negócio válida e retorna `200 OK`. `policy_version` é persistida internamente, mas não é retornada ao cliente. Toda resposta inclui `X-Correlation-Id` para correlação com os logs técnicos.
+
+| Status | Significado |
+|---:|---|
+| `200` | Decisão válida, aprovada ou negada |
+| `400` | Body, UF, valor ou `Idempotency-Key` inválido |
+| `409` | Mesma chave reutilizada com payload diferente |
+| `500` | Falha técnica inesperada, sem detalhes internos do banco |
 
 ## Idempotência e concorrência
 
@@ -157,36 +173,115 @@ Essas garantias são cobertas por testes de integração com PostgreSQL e Testco
 
 ### Pré-requisitos
 
-- Node.js 24;
-- npm.
+- Git;
+- Node.js 24 e npm;
+- Docker com o daemon em execução, tanto para o PostgreSQL local quanto para os testes de integração.
 
-### Instalação
+### Instalação a partir de um clone limpo
 
 ```bash
+git clone <url-do-repositorio>
+cd faz-cred-use-case
 npm ci
 ```
 
-### Desenvolvimento
+### Criar um PostgreSQL local vazio
 
-`PORT` é obrigatória e deve ser fornecida ao processo:
+O exemplo abaixo cria um banco descartável e dois usuários: o migrador possui DDL; a aplicação recebe somente DML nas tabelas criadas. As senhas são apenas exemplos locais e devem ser substituídas fora desse ambiente.
 
 ```bash
-PORT=3000 npm run dev
+docker run --name loan-decision-postgres \
+  -e POSTGRES_USER=loan_decision_migrator \
+  -e POSTGRES_PASSWORD=local_migrator_password \
+  -e POSTGRES_DB=loan_decision \
+  -p 5432:5432 \
+  -d postgres:17
+
+until docker exec loan-decision-postgres \
+  pg_isready -U loan_decision_migrator -d loan_decision; do sleep 1; done
+
+docker exec loan-decision-postgres psql \
+  -U loan_decision_migrator \
+  -d loan_decision \
+  -v ON_ERROR_STOP=1 \
+  -c "CREATE ROLE loan_decision_app LOGIN PASSWORD 'local_app_password'" \
+  -c "GRANT CONNECT ON DATABASE loan_decision TO loan_decision_app" \
+  -c "GRANT USAGE ON SCHEMA public TO loan_decision_app" \
+  -c "ALTER DEFAULT PRIVILEGES FOR ROLE loan_decision_migrator IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO loan_decision_app"
 ```
 
-Verifique o serviço em `http://localhost:3000/health`.
+Na primeira inicialização, `MIGRATION_DATABASE_URL` aplica todas as migrations no banco vazio. O pool da aplicação usa `DATABASE_URL`, mantendo as credenciais de DDL separadas das credenciais de runtime.
 
-### Build e execução
+### Configuração
+
+| Variável | Obrigatória | Uso |
+|---|---|---|
+| `PORT` | Sim | Porta HTTP entre 1 e 65535 |
+| `DATABASE_URL` | Sim | Conexão do usuário de runtime com menor privilégio |
+| `MIGRATION_DATABASE_URL` | Sim | Conexão do usuário autorizado a executar migrations |
+| `DATABASE_SSL_MODE` | Sim | `disable` para ambiente local confiável ou `verify-full` |
+| `DATABASE_SSL_CA` | Quando necessário | CA confiável usada com `verify-full` |
+| `NODE_ENV` | Não | `production` por padrão; stacks sanitizados somente fora de produção |
+
+As variáveis contêm credenciais e não devem ser commitadas. O arquivo [.env.example](.env.example) contém apenas valores locais ilustrativos; o processo não carrega `.env` automaticamente.
+
+Para executar em desenvolvimento:
+
+```bash
+export PORT=3000
+export DATABASE_URL='postgresql://loan_decision_app:local_app_password@localhost:5432/loan_decision'
+export MIGRATION_DATABASE_URL='postgresql://loan_decision_migrator:local_migrator_password@localhost:5432/loan_decision'
+export DATABASE_SSL_MODE=disable
+export NODE_ENV=development
+npm run dev
+```
+
+Em outro terminal:
+
+```bash
+curl --fail http://localhost:3000/health
+
+curl --include \
+  --request POST http://localhost:3000/loan-decisions \
+  --header 'Content-Type: application/json' \
+  --header 'Idempotency-Key: example-intention-001' \
+  --data '{"borrower_id":"example-borrower","uf":"GO","amount":10000}'
+```
+
+O primeiro comando retorna `{"status":"ok"}`. Em um banco vazio com a política inicial, a solicitação de exemplo é aprovada e retorna `decision`, `message` e `loan_id` com status `200`.
+
+### Build e execução de produção
 
 ```bash
 npm run build
-PORT=3000 npm start
+export PORT=3000
+export DATABASE_URL='<url-do-usuario-runtime>'
+export MIGRATION_DATABASE_URL='<url-do-usuario-de-migrations>'
+export DATABASE_SSL_MODE=verify-full
+export DATABASE_SSL_CA='<ca-confiavel-em-pem>'
+export NODE_ENV=production
+npm start
 ```
+
+Em produção, forneça segredos por um gerenciador de segredos, use usuários distintos para migration e runtime e mantenha `verify-full`. A aplicação executa migrations antes de abrir a porta HTTP e encerra o pool de migrations em seguida.
 
 ### Testes e verificações
 
+Os testes de domínio não precisam de banco:
+
+```bash
+npx vitest run src/domain
+```
+
+Com Docker ativo, a suíte completa provisiona PostgreSQL descartável via Testcontainers e cobre persistência, rollback, migrations, idempotência, concorrência, reconstrução dos agregados, HTTP e logs:
+
 ```bash
 npm test
+```
+
+Execute também as verificações estáticas e o build:
+
+```bash
 npm run typecheck
 npm run build
 ```
@@ -206,11 +301,19 @@ O plano de construção está registrado em [PLANO-DE-IMPLEMENTACAO-PRD-0.8.md](
 ## Segurança e observabilidade
 
 - queries exclusivamente parametrizadas;
-- credenciais fora do código;
-- TLS e usuário de banco com menor privilégio;
+- credenciais fornecidas por ambiente, fora do código;
+- pools separados para migrations e runtime;
+- TLS verificável e usuário de banco com menor privilégio;
 - logs com `correlation_id`, rota, método, status e duração;
 - nenhum token, segredo, payload completo ou dado pessoal completo nos logs;
-- stack trace apenas no ambiente apropriado.
+- stack trace sanitizado apenas fora de produção;
+- erros HTTP genéricos, sem mensagens internas do PostgreSQL.
+
+Os logs são JSON emitidos em `stdout`, adequados para coleta pela plataforma de execução. A retenção deve ser definida externamente quando houver uma política aprovada.
+
+## Operação dos agregados
+
+`PostgresExposureRebuilder` verifica divergências e reconstrói `exposure_aggregates` a partir de `loans` dentro de uma transação com lock exclusivo. A operação é interna e administrativa: este MVP não expõe endpoint público nem comando CLI para executá-la. Os testes de integração demonstram reconstrução de carteira vazia, múltiplas UFs e correção de divergência.
 
 ## Fora do escopo do MVP
 
@@ -227,7 +330,11 @@ O plano de construção está registrado em [PLANO-DE-IMPLEMENTACAO-PRD-0.8.md](
 ## Limitações conhecidas
 
 - quitação e redução de exposição estão fora deste incremento, portanto o total acumulado só cresce;
-- os prazos de retenção de idempotência e logs permanecem em aberto na PRD 0.8.
+- os prazos de retenção de idempotência e logs permanecem em aberto na PRD 0.8;
+- migrations são executadas no startup; implantações com muitas réplicas podem preferir uma etapa exclusiva de deployment;
+- locks pessimistas no agregado `TOTAL` preservam consistência, mas limitam throughput sob contenção elevada;
+- a reconstrução de agregados existe como operação interna, sem interface administrativa;
+- não há autenticação ou autorização neste serviço: a identidade recebida deve ter sido validada pelo componente anterior.
 
 ## Decisões e trade-offs
 
@@ -236,3 +343,12 @@ O plano de construção está registrado em [PLANO-DE-IMPLEMENTACAO-PRD-0.8.md](
 - **Políticas versionadas:** permitem alterar percentuais sem mudar a lógica, ao custo de persistência e validação adicionais.
 - **Bootstrap explícito:** torna possível formar a carteira inicial, mas é uma premissa de produto adicionada porque o case não define esse cenário.
 - **Implementação incremental com TDD:** reduz o escopo de cada mudança e mantém commits reversíveis, mas adia o primeiro fluxo HTTP completo até as dependências estarem prontas.
+
+## Possíveis evoluções
+
+- definir e automatizar retenção de logs e registros idempotentes;
+- mover migrations para uma etapa exclusiva do deployment;
+- oferecer um comando administrativo autenticado para verificar e reconstruir agregados;
+- adicionar autenticação, autorização, métricas operacionais e tracing distribuído;
+- executar testes de carga para calibrar pool, timeout de lock e política de retries;
+- modelar quitação, cancelamento e redução de exposição em um incremento futuro, com novas regras de consistência.

@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "d79a5a34-6ac8-49c5-bf64-bdfd4931f371",
     "name": "Loan Decision",
-    "description": "Coleção incremental para validar apenas os comportamentos HTTP já expostos pelo serviço Loan Decision. As validações internas sem endpoint são documentadas em TESTES-MANUAIS.md.",
+    "description": "Coleção incremental dos comportamentos HTTP do Loan Decision. Execute a pasta Loan decisions na ordem apresentada; detalhes internos estão em TESTES-MANUAIS.md.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -78,12 +78,497 @@
           ]
         }
       ]
+    },
+    {
+      "name": "Loan decisions",
+      "description": "Comportamentos HTTP disponíveis desde a Tarefa 13. Execute esta pasta na ordem apresentada.",
+      "item": [
+        {
+          "name": "Approval",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"returns HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const response = pm.response.json();",
+                  "pm.test(\"returns the public approval contract\", function () {",
+                  "  pm.expect(response.decision).to.eql(\"APPROVED\");",
+                  "  pm.expect(response.message).to.eql(\"O valor solicitado foi aprovado.\");",
+                  "  pm.expect(response.loan_id).to.be.a(\"string\").and.not.empty;",
+                  "  pm.expect(Object.keys(response).sort()).to.eql([\"decision\", \"loan_id\", \"message\"]);",
+                  "});",
+                  "pm.collectionVariables.set(\"approved_loan_id\", response.loan_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "postman-approval-key",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"borrower_id\": \"postman-approved-borrower\",\n  \"uf\": \"GO\",\n  \"amount\": 500000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Cria uma intenção aprovada; chave e payload fixos tornam novas execuções idempotentes.",
+            "url": {
+              "raw": "{{base_url}}/loan-decisions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "loan-decisions"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Replay approval",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"returns HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const response = pm.response.json();",
+                  "pm.test(\"replays the same approval\", function () {",
+                  "  pm.expect(response.loan_id).to.eql(pm.collectionVariables.get(\"approved_loan_id\"));",
+                  "  pm.expect(response).not.to.have.property(\"policy_version\");",
+                  "  pm.expect(response).not.to.have.property(\"policyVersion\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "postman-approval-key",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"borrower_id\": \"postman-approved-borrower\",\n  \"uf\": \"GO\",\n  \"amount\": 500000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Repete exatamente a aprovação anterior.",
+            "url": {
+              "raw": "{{base_url}}/loan-decisions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "loan-decisions"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Denial",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"returns HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const response = pm.response.json();",
+                  "pm.test(\"returns the public denial contract\", function () {",
+                  "  pm.expect(response).to.eql({ decision: \"DENIED\", message: \"O empréstimo foi negado.\" });",
+                  "  pm.expect(response).not.to.have.property(\"loan_id\");",
+                  "  pm.expect(response).not.to.have.property(\"policy_version\");",
+                  "});",
+                  "pm.collectionVariables.set(\"denied_response\", JSON.stringify(response));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "postman-denial-key",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"borrower_id\": \"postman-denied-borrower\",\n  \"uf\": \"GO\",\n  \"amount\": 1000001\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Solicita um centavo acima do limite de bootstrap de GO.",
+            "url": {
+              "raw": "{{base_url}}/loan-decisions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "loan-decisions"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Replay denial",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"returns HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"replays the same denial\", function () {",
+                  "  pm.expect(JSON.stringify(pm.response.json())).to.eql(pm.collectionVariables.get(\"denied_response\"));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "postman-denial-key",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"borrower_id\": \"postman-denied-borrower\",\n  \"uf\": \"GO\",\n  \"amount\": 1000001\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Repete exatamente a negativa anterior.",
+            "url": {
+              "raw": "{{base_url}}/loan-decisions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "loan-decisions"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Conflict setup",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"registers the original intention\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().decision).to.eql(\"APPROVED\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "postman-conflict-key",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"borrower_id\": \"postman-conflict-borrower\",\n  \"uf\": \"GO\",\n  \"amount\": 400000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Registra a intenção original do cenário seguinte.",
+            "url": {
+              "raw": "{{base_url}}/loan-decisions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "loan-decisions"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Conflicting payload",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"returns HTTP 409\", function () { pm.response.to.have.status(409); });",
+                  "pm.test(\"returns the conflict contract\", function () {",
+                  "  pm.expect(pm.response.json()).to.eql({ error: \"Idempotency key conflicts with a different request\" });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "postman-conflict-key",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"borrower_id\": \"postman-conflict-borrower\",\n  \"uf\": \"GO\",\n  \"amount\": 300000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Reutiliza solicitante e chave com outro valor.",
+            "url": {
+              "raw": "{{base_url}}/loan-decisions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "loan-decisions"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Invalid body",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"returns HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"returns generic validation error\", function () { pm.expect(pm.response.json()).to.eql({ error: \"Invalid request\" }); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "postman-invalid-body-key",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"borrower_id\": \"postman-invalid-borrower\",\n  \"uf\": \"XX\",\n  \"amount\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Envia uma UF inexistente e valor inválido.",
+            "url": {
+              "raw": "{{base_url}}/loan-decisions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "loan-decisions"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Missing Idempotency-Key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"returns HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"returns generic validation error\", function () { pm.expect(pm.response.json()).to.eql({ error: \"Invalid request\" }); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"borrower_id\": \"postman-missing-key-borrower\",\n  \"uf\": \"GO\",\n  \"amount\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Envia payload válido sem o header obrigatório.",
+            "url": {
+              "raw": "{{base_url}}/loan-decisions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "loan-decisions"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Malformed JSON",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"returns HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"returns generic validation error\", function () { pm.expect(pm.response.json()).to.eql({ error: \"Invalid request\" }); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "postman-malformed-json-key",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Envia JSON sintaticamente inválido.",
+            "url": {
+              "raw": "{{base_url}}/loan-decisions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "loan-decisions"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
     }
   ],
   "variable": [
     {
       "key": "base_url",
       "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "approved_loan_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "denied_response",
+      "value": "",
       "type": "string"
     }
   ]

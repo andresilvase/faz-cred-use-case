@@ -1598,3 +1598,171 @@ A idempotência está implementada no caso de uso e no PostgreSQL, mas o endpoin
 
 Adicionar agora requests com Idempotency-Key representaria uma interface HTTP inexistente. Replay, conflito HTTP 409 e isolamento entre chaves serão acrescentados à coleção quando a rota estiver disponível.
 
+## Tarefa 13 — Expor POST /loan-decisions
+
+### Objetivo verificável
+
+Confirmar pelo contrato HTTP que:
+
+- aprovação e negativa retornam HTTP 200 com seus contratos públicos;
+- policy_version nunca aparece na resposta;
+- body, header ou JSON inválido retorna HTTP 400;
+- reutilizar a mesma chave com payload diferente retorna HTTP 409;
+- falha técnica retorna HTTP 500 genérico, sem detalhes do PostgreSQL;
+- retries reproduzem a resposta original.
+
+### Preparar PostgreSQL e serviço
+
+Depois de um clone limpo:
+
+~~~bash
+npm ci
+docker run --name loan-decision-manual-postgres -e POSTGRES_USER=loan_decision -e POSTGRES_PASSWORD=loan_decision -e POSTGRES_DB=loan_decision -p 5432:5432 -d postgres:17
+~~~
+
+Se o container já existir e estiver parado:
+
+~~~bash
+docker start loan-decision-manual-postgres
+~~~
+
+Aguarde o banco:
+
+~~~bash
+until docker exec loan-decision-manual-postgres pg_isready -U loan_decision -d loan_decision; do sleep 1; done
+~~~
+
+Inicie o serviço em outro terminal:
+
+~~~bash
+PORT=3000 DATABASE_URL=postgresql://loan_decision:loan_decision@localhost:5432/loan_decision npm run dev
+~~~
+
+A aplicação deve aplicar as migrations e responder HTTP 200 em http://localhost:3000/health. Se a porta 5432 estiver ocupada, publique outra porta e ajuste DATABASE_URL.
+
+### Executar no Postman
+
+1. Importe ou atualize Loan-Decision.postman_collection.json na extensão Postman do VS Code.
+2. Confirme base_url como http://localhost:3000.
+3. Execute Service health / GET /health.
+4. Execute a pasta Loan decisions completa e na ordem apresentada.
+
+A pasta contém:
+
+~~~text
+Approval
+Replay approval
+Denial
+Replay denial
+Conflict setup
+Conflicting payload
+Invalid body
+Missing Idempotency-Key
+Malformed JSON
+~~~
+
+As chaves e os solicitantes são fixos e exclusivos dos testes. Assim, executar a pasta novamente recupera respostas idempotentes sem duplicar efeitos.
+
+### Aprovação e replay
+
+Approval envia amount 500000 para GO com postman-approval-key. Resultado esperado:
+
+~~~json
+{
+  "decision": "APPROVED",
+  "message": "O valor solicitado foi aprovado.",
+  "loan_id": "<UUID>"
+}
+~~~
+
+Replay approval repete o mesmo solicitante, chave e payload e deve retornar o mesmo loan_id. Nenhuma resposta pode conter policy_version ou policyVersion.
+
+### Negativa e replay
+
+Denial envia amount 1000001 para GO com postman-denial-key, um centavo acima do limite absoluto inicial da UF. Resultado esperado:
+
+~~~json
+{
+  "decision": "DENIED",
+  "message": "O empréstimo foi negado."
+}
+~~~
+
+Replay denial deve reproduzir exatamente o JSON. Não pode existir loan_id nem versão da política.
+
+### Conflito e entradas inválidas
+
+Conflict setup registra amount 400000 com postman-conflict-key. Conflicting payload reutiliza solicitante e chave com amount 300000.
+
+Resultado esperado:
+
+- HTTP 409;
+- corpo igual a:
+
+~~~json
+{
+  "error": "Idempotency key conflicts with a different request"
+}
+~~~
+
+Invalid body, Missing Idempotency-Key e Malformed JSON devem retornar HTTP 400 e:
+
+~~~json
+{
+  "error": "Invalid request"
+}
+~~~
+
+### Falha técnica sem vazamento
+
+A coleção não provoca HTTP 500, pois isso exigiria danificar o schema em uso. O cenário fica isolado no PostgreSQL descartável da suíte automatizada:
+
+~~~bash
+before="$(docker ps -q --filter ancestor=postgres:17 | sort)"; npm test -- src/interfaces/http/loan-decisions.test.ts --reporter=verbose; test_exit_code=$?; after="$(docker ps -q --filter ancestor=postgres:17 | sort)"; if [ "$before" != "$after" ]; then echo "FAIL: a lista de containers postgres:17 mudou"; docker ps --filter ancestor=postgres:17; exit 1; fi; exit "$test_exit_code"
+~~~
+
+Resultado esperado:
+
+- uma suíte e 15 casos aprovados;
+- cenário returns a generic 500 without exposing database details aprovado;
+- nenhum container PostgreSQL adicional restante;
+- resposta exatamente igual a:
+
+~~~json
+{
+  "error": "Internal server error"
+}
+~~~
+
+A resposta não pode conter exposure_aggregates, PostgreSQL ou mensagem interna do banco.
+
+### Verificação completa
+
+~~~bash
+npm test
+npm run typecheck
+npm run build
+~~~
+
+Todos devem terminar com exit code 0. Após o build:
+
+~~~bash
+test ! -e dist/test-support/postgres-test-harness.js && echo "Harness ausente do build de produção"
+~~~
+
+### Limitações e limpeza
+
+A coleção comprova o contrato HTTP e retries sequenciais, não segurança concorrente, que pertence à Tarefa 14. Os dados são fictícios e não devem ser executados em produção.
+
+Para interromper o PostgreSQL manual:
+
+~~~bash
+docker stop loan-decision-manual-postgres
+~~~
+
+Remova-o somente se não precisar preservar seus dados:
+
+~~~bash
+docker rm loan-decision-manual-postgres
+~~~
+

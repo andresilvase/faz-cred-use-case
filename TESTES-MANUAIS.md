@@ -1766,3 +1766,185 @@ Remova-o somente se não precisar preservar seus dados:
 docker rm loan-decision-manual-postgres
 ~~~
 
+## Tarefa 14 — Garantir segurança concorrente
+
+### Objetivo verificável
+
+Confirmar no PostgreSQL descartável que:
+
+- decisões simultâneas para a mesma UF não aprovam um conjunto acima do limite;
+- decisões simultâneas para UFs diferentes disputam e atualizam TOTAL sem perder exposição;
+- a soma oficial em loans permanece igual ao agregado TOTAL;
+- os locks seguem a ordem TOTAL e depois UF;
+- deadlock, falha de serialização e timeout de lock são classificados como transitórios;
+- a transação inteira é repetida somente para erros transitórios e dentro do limite configurado;
+- erros permanentes não são repetidos;
+- nenhum container PostgreSQL adicional permanece após os testes.
+
+### Pré-requisitos
+
+Esta tarefa exige Docker disponível:
+
+~~~bash
+docker info >/dev/null && echo "Docker disponível"
+~~~
+
+Depois de um clone limpo:
+
+~~~bash
+npm ci
+~~~
+
+### Executar os cenários concorrentes e de retry
+
+Registre os containers existentes e execute as duas especificações da Tarefa 14:
+
+~~~bash
+before="$(docker ps -q --filter ancestor=postgres:17 | sort)"; npm test -- src/application/loan-decision-concurrency.test.ts src/infrastructure/database/postgres-approved-loan-transaction.test.ts --reporter=verbose; test_exit_code=$?; after="$(docker ps -q --filter ancestor=postgres:17 | sort)"; if [ "$before" != "$after" ]; then echo "FAIL: a lista de containers postgres:17 mudou"; docker ps --filter ancestor=postgres:17; exit 1; fi; exit "$test_exit_code"
+~~~
+
+Resultado esperado:
+
+- exit code 0;
+- duas suítes aprovadas;
+- 5 testes aprovados;
+- nenhuma falha;
+- nenhum container PostgreSQL 17 adicional;
+- os seguintes cenários aprovados:
+
+~~~text
+approves only the allowed request when two decisions target the same UF
+serializes different UFs through TOTAL without losing exposure
+retries the complete transaction after a PostgreSQL deadlock
+retries after lock timeout and succeeds when the aggregate is released
+does not retry a non-transient PostgreSQL error
+~~~
+
+### Duas decisões para a mesma UF
+
+O cenário dispara simultaneamente duas solicitações de 600000 unidades monetárias mínimas para GO, cada uma com solicitante e chave de idempotência distintos.
+
+Isoladamente, ambas caberiam no limite inicial de GO, mas juntas totalizariam 1200000, acima do teto de bootstrap de 1000000 para essa UF.
+
+Resultado esperado:
+
+~~~text
+decisões = APPROVED, DENIED
+quantidade de loans = 1
+soma oficial em loans = 600000
+agregado TOTAL = 600000
+agregado GO = 600000
+~~~
+
+A ordem de qual solicitação vence não é relevante. A invariante é existir exatamente uma aprovação e nenhuma exposição acima do permitido.
+
+### UFs diferentes disputando TOTAL
+
+O cenário dispara simultaneamente uma solicitação de 400000 para GO e outra de 400000 para BA.
+
+Resultado esperado:
+
+~~~text
+decisões = APPROVED, APPROVED
+quantidade de loans = 2
+soma oficial em loans = 800000
+agregado TOTAL = 800000
+agregado GO = 400000
+agregado BA = 400000
+~~~
+
+Mesmo usando linhas de UF diferentes, as transações são serializadas pelo lock de TOTAL. Isso impede lost update e mantém a soma oficial igual à projeção.
+
+### Ordem dos locks
+
+A ordem continua sendo:
+
+~~~text
+TOTAL → UF
+~~~
+
+Todas as decisões disputam TOTAL antes de bloquear ou criar a linha da UF. A Tarefa 9 comprova diretamente essa ordem com lock_timeout; a Tarefa 14 comprova que ela preserva as invariantes quando as decisões são executadas em paralelo.
+
+### Timeout e retries técnicos
+
+Cada tentativa configura lock_timeout local à transação. Os valores padrão são:
+
+~~~text
+lock timeout = 1000 ms
+máximo de retries = 2
+atraso inicial = 10 ms
+backoff exponencial = 10 ms, 20 ms
+~~~
+
+Os códigos PostgreSQL considerados transitórios são:
+
+~~~text
+40P01 = deadlock_detected
+40001 = serialization_failure
+55P03 = lock_not_available ou lock timeout
+~~~
+
+Quando um deles ocorre, a tentativa é revertida e toda a função transacional é executada novamente em uma nova transação.
+
+O teste de timeout mantém TOTAL bloqueado, força a primeira tentativa a ultrapassar 50 ms, libera o lock e exige sucesso na segunda tentativa.
+
+O teste de deadlock injeta um erro com SQLSTATE 40P01 para verificar a classificação e o retry completo. Ele não constrói um deadlock real entre duas sessões.
+
+### Erro permanente não deve ser repetido
+
+O cenário injeta SQLSTATE 23505, violação de unicidade.
+
+Resultado esperado:
+
+~~~text
+tentativas = 1
+erro forced unique violation propagado
+~~~
+
+Repetir automaticamente um erro permanente não poderia produzir sucesso e aumentaria carga ou ocultaria o defeito.
+
+### Invariantes verificadas
+
+Depois dos cenários paralelos, a suíte consulta diretamente:
+
+- quantidade de empréstimos;
+- soma de amount_minor_units em loans;
+- amount_minor_units de TOTAL;
+- linhas e valores de cada UF.
+
+A condição essencial é:
+
+~~~text
+SUM(loans.amount_minor_units) = exposure_aggregates[TOTAL]
+~~~
+
+e cada agregado de UF deve corresponder aos empréstimos aprovados daquela UF.
+
+### Verificação completa do projeto
+
+~~~bash
+npm test
+npm run typecheck
+npm run build
+~~~
+
+Todos os comandos devem terminar com exit code 0. Após o build:
+
+~~~bash
+test ! -e dist/test-support/postgres-test-harness.js && echo "Harness ausente do build de produção"
+~~~
+
+### Limitações
+
+Os testes comprovam as invariantes nas combinações implementadas de mesma UF e UFs diferentes. Eles não são teste de carga, soak test ou prova formal para qualquer volume de concorrência.
+
+O cenário de deadlock valida o tratamento por SQLSTATE usando um erro injetado; o timeout de lock e a disputa concorrente usam locks reais do PostgreSQL.
+
+A concorrência simultânea da mesma Idempotency-Key não é exercitada por esta tarefa. As solicitações paralelas usam chaves distintas.
+
+### Por que a Tarefa 14 não adiciona requests ao Postman
+
+A Tarefa 14 não altera o contrato HTTP. Runners comuns do Postman executam requests sequencialmente e, portanto, não demonstram que duas transações realmente disputaram o mesmo lock.
+
+A coleção da Tarefa 13 continua válida para o contrato público. A segurança concorrente deve ser verificada pelas duas suítes de integração contra PostgreSQL real.
+

@@ -999,3 +999,173 @@ A tarefa implementa persistência e locks internos, sem acrescentar endpoint HTT
 
 Os testes acima comprovam schema, criação sob demanda, leitura, atualização, rollback e ordem dos locks. Eles ainda não comprovam o fluxo transacional completo da decisão nem o contrato HTTP.
 
+## Tarefa 10 — Persistir uma aprovação atomicamente
+
+### Objetivo verificável
+
+Confirmar no PostgreSQL descartável que:
+
+- uma solicitação aprovada cria exatamente um empréstimo;
+- o empréstimo e os agregados de TOTAL e da UF refletem o mesmo valor;
+- a versão da política usada na decisão é persistida no empréstimo;
+- uma nova política vigente é lida dentro da transação;
+- uma falha técnica depois do INSERT desfaz o empréstimo, a criação da UF e as alterações dos agregados;
+- o teste não deixa um container PostgreSQL adicional em execução.
+
+### Pré-requisitos
+
+Esta tarefa usa o PostgreSQL 17 descartável preparado na Tarefa 7. Confirme que o Docker está disponível:
+
+~~~bash
+docker info >/dev/null && echo "Docker disponível"
+~~~
+
+Resultado esperado:
+
+~~~text
+Docker disponível
+~~~
+
+Depois de um clone limpo:
+
+~~~bash
+npm ci
+~~~
+
+O comando deve terminar com exit code 0 sem modificar package-lock.json.
+
+### Executar a integração da aprovação atômica
+
+Registre os containers existentes, execute somente a especificação da Tarefa 10 e confirme que nenhum PostgreSQL adicional permaneceu:
+
+~~~bash
+before="$(docker ps -q --filter ancestor=postgres:17 | sort)"; npm test -- src/application/persist-approved-loan.test.ts --reporter=verbose; test_exit_code=$?; after="$(docker ps -q --filter ancestor=postgres:17 | sort)"; if [ "$before" != "$after" ]; then echo "FAIL: a lista de containers postgres:17 mudou"; docker ps --filter ancestor=postgres:17; exit 1; fi; exit "$test_exit_code"
+~~~
+
+Resultado esperado:
+
+- exit code 0;
+- uma suíte aprovada;
+- 3 testes aprovados;
+- nenhuma falha;
+- os seguintes cenários reportados como aprovados:
+
+~~~text
+creates one approved loan and updates matching exposures atomically
+reads a new active policy inside the transaction and persists its version
+rolls back the loan and aggregates when updating exposure fails after insert
+~~~
+
+A comparação dos IDs de containers preserva qualquer PostgreSQL 17 que já estivesse ativo e detecta somente a permanência de um container adicional.
+
+### Evidências da aprovação persistida
+
+O primeiro cenário solicita 1.000.000 de unidades monetárias mínimas para GO e exige um resultado interno com:
+
+~~~text
+decision = APPROVED
+message = O valor solicitado foi aprovado.
+policyVersion = 1
+loanId = identificador UUID gerado
+~~~
+
+Após o commit, a tabela loans deve conter exatamente um registro:
+
+~~~text
+borrower_id = borrower-123
+uf = GO
+amount_minor_units = 1000000
+policy_version = 1
+~~~
+
+Os agregados devem conter exatamente:
+
+~~~text
+GO = 1000000
+TOTAL = 1000000
+~~~
+
+O mesmo valor no empréstimo, na UF e no total evidencia que a fonte oficial e sua projeção foram persistidas de forma consistente.
+
+### Evidências do versionamento da política
+
+O segundo cenário desativa a política 1 e cria a política 2 como vigente, com limite padrão de 25%. Em seguida, solicita 2.000.000 de unidades monetárias mínimas para GO.
+
+Resultado esperado:
+
+~~~text
+resultado interno: policyVersion = 2
+loans.policy_version = 2
+~~~
+
+Isso comprova que a política vigente é lida durante a operação transacional e que a versão efetivamente aplicada acompanha o empréstimo. A versão permanece interna e ainda não é exposta por HTTP.
+
+### Evidências do rollback integral
+
+O terceiro cenário instala temporariamente um trigger que força uma falha ao atualizar exposure_aggregates. A falha ocorre depois da tentativa de inserir o empréstimo.
+
+Resultado esperado após o rollback:
+
+~~~text
+quantidade de loans = 0
+TOTAL = 0
+linha de GO ausente
+~~~
+
+A exceção deve conter a mensagem técnica forçada:
+
+~~~text
+forced exposure update failure
+~~~
+
+Nenhum empréstimo, agregado de UF ou aumento do total pode sobreviver. Isso comprova que INSERT e atualização dos agregados participam da mesma transação.
+
+### Escopo comprovado e limitação
+
+A suíte comprova atomicidade diante da falha técnica injetada, persistência da versão e consistência entre o empréstimo aprovado e os agregados. Ela não comprova ainda:
+
+- o caminho normal de uma negativa, pertencente à Tarefa 11;
+- idempotência, pertencente à Tarefa 12;
+- contrato HTTP, pertencente à Tarefa 13;
+- segurança sob requisições concorrentes, pertencente à Tarefa 14.
+
+A migration cria constraints e índices para loans, mas esta especificação não exercita individualmente cada violação de constraint nem mede o uso dos índices pelo planejador do PostgreSQL.
+
+### Verificação completa do projeto
+
+~~~bash
+npm test
+npm run typecheck
+npm run build
+~~~
+
+Todos os comandos devem terminar com exit code 0. A suíte completa requer Docker.
+
+Após o build, confirme que o suporte de testes continua fora do artefato de produção:
+
+~~~bash
+test ! -e dist/test-support/postgres-test-harness.js && echo "Harness ausente do build de produção"
+~~~
+
+Resultado esperado:
+
+~~~text
+Harness ausente do build de produção
+~~~
+
+### Limpeza segura
+
+Os testes recriam o schema public antes de cada cenário e encerram pool e container no afterAll. Se uma execução for interrompida abruptamente, liste os containers:
+
+~~~bash
+docker ps --filter ancestor=postgres:17
+~~~
+
+Não interrompa containers preexistentes. Remova somente um container comprovadamente criado pela execução interrompida.
+
+### Por que a Tarefa 10 não está no Postman
+
+A aprovação atômica foi implementada como caso de uso da aplicação e transação de infraestrutura, mas ainda não foi conectada a uma rota Express. O endpoint POST /loan-decisions está previsto para a Tarefa 13.
+
+Adicionar uma requisição agora representaria uma interface HTTP inexistente. Os testes manuais desta tarefa são, portanto, executados pela especificação de integração contra um PostgreSQL descartável.
+

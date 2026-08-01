@@ -15,18 +15,62 @@ import type {
 import { PostgresConcentrationPolicyRepository } from "./postgres-concentration-policy-repository.js";
 import { PostgresExposureRepository } from "./postgres-exposure-repository.js";
 
+const RETRYABLE_TRANSACTION_CODES = new Set(["40P01", "40001", "55P03"]);
+const DEFAULT_LOCK_TIMEOUT_MS = 1_000;
+const DEFAULT_MAX_RETRIES = 2;
+const DEFAULT_RETRY_DELAY_MS = 10;
+
+export interface PostgresTransactionOptions {
+  readonly lockTimeoutMs?: number;
+  readonly maxRetries?: number;
+  readonly retryDelayMs?: number;
+}
+
 export class PostgresApprovedLoanTransaction
   implements ApprovedLoanTransactionRunner
 {
-  constructor(private readonly pool: Pool) {}
+  private readonly lockTimeoutMs: number;
+  private readonly maxRetries: number;
+  private readonly retryDelayMs: number;
+
+  constructor(
+    private readonly pool: Pool,
+    options: PostgresTransactionOptions = {},
+  ) {
+    this.lockTimeoutMs = options.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
+    this.maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
+    this.retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
+  }
 
   async run<T>(
+    operation: (transaction: ApprovedLoanTransaction) => Promise<T>,
+  ): Promise<T> {
+    for (let retryCount = 0; ; retryCount += 1) {
+      try {
+        return await this.runAttempt(operation);
+      } catch (error) {
+        if (
+          retryCount >= this.maxRetries ||
+          !isRetryableTransactionError(error)
+        ) {
+          throw error;
+        }
+
+        await wait(this.retryDelayMs * 2 ** retryCount);
+      }
+    }
+  }
+
+  private async runAttempt<T>(
     operation: (transaction: ApprovedLoanTransaction) => Promise<T>,
   ): Promise<T> {
     const client = await this.pool.connect();
 
     try {
       await client.query("BEGIN");
+      await client.query("SELECT set_config('lock_timeout', $1, true)", [
+        `${this.lockTimeoutMs}ms`,
+      ]);
       const exposureRepository = new PostgresExposureRepository(client);
       const policyRepository = new PostgresConcentrationPolicyRepository(
         client,
@@ -59,6 +103,20 @@ export class PostgresApprovedLoanTransaction
       client.release();
     }
   }
+}
+
+function isRetryableTransactionError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string" &&
+    RETRYABLE_TRANSACTION_CODES.has(error.code)
+  );
+}
+
+async function wait(milliseconds: number): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 }
 
 interface IdempotencyRequestRow extends QueryResultRow {

@@ -14,3 +14,8 @@ prompt="\$loan-decision-verify-manual-tests ${task_number}"
 exec codex exec \
   --sandbox workspace-write \
   "$prompt"
+
+# Uncomment when you want to run the command with full access to the sandbox.
+# exec codex exec \
+#   --sandbox danger-full-access \
+#   "$prompt"

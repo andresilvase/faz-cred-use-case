@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { MIGRATIONS } from "../infrastructure/database/migrations.js";
 import { runMigrations } from "../infrastructure/database/run-migrations.js";
 
 import {
@@ -52,7 +53,7 @@ describe("PostgresTestHarness", () => {
     );
 
     expect(migratedTable.rows).toEqual([{ name: "migration_probe" }]);
-    expect(appliedMigrations.rows).toEqual([{ count: 1 }]);
+    expect(appliedMigrations.rows).toEqual([{ count: MIGRATIONS.length }]);
   });
 
   it("rolls back every migration change when a migration fails", async () => {

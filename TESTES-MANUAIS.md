@@ -1339,3 +1339,262 @@ O caminho de negativa foi implementado no caso de uso da aplicação e na transa
 
 Adicionar uma requisição Postman agora representaria uma interface HTTP inexistente. A resposta pública 200 com decision igual a DENIED somente poderá ser validada no Postman quando a rota existir.
 
+## Tarefa 12 — Implementar idempotência ponta a ponta
+
+### Objetivo verificável
+
+Confirmar no PostgreSQL descartável que:
+
+- repetir uma aprovação com o mesmo solicitante, chave e payload retorna o resultado original;
+- o retry aprovado não cria outro empréstimo nem aumenta novamente a exposição;
+- repetir uma negativa retorna a mesma negativa sem criar empréstimo;
+- reutilizar a mesma chave e solicitante com payload diferente produz conflito;
+- o mesmo solicitante pode iniciar intenções distintas com chaves diferentes;
+- solicitantes diferentes podem usar a mesma chave independentemente;
+- empréstimo, agregados e registro idempotente são revertidos juntos diante de falha técnica;
+- o teste não deixa um container PostgreSQL adicional em execução.
+
+### Pré-requisitos
+
+Esta tarefa usa o PostgreSQL 17 descartável preparado na Tarefa 7. Confirme que o Docker está disponível:
+
+~~~bash
+docker info >/dev/null && echo "Docker disponível"
+~~~
+
+Resultado esperado:
+
+~~~text
+Docker disponível
+~~~
+
+Depois de um clone limpo:
+
+~~~bash
+npm ci
+~~~
+
+O comando deve terminar com exit code 0 sem modificar package-lock.json.
+
+### Executar a integração da idempotência
+
+Registre os containers existentes, execute a especificação da Tarefa 12 e confirme que nenhum PostgreSQL adicional permaneceu:
+
+~~~bash
+before="$(docker ps -q --filter ancestor=postgres:17 | sort)"; npm test -- src/application/persist-approved-loan.test.ts --reporter=verbose; test_exit_code=$?; after="$(docker ps -q --filter ancestor=postgres:17 | sort)"; if [ "$before" != "$after" ]; then echo "FAIL: a lista de containers postgres:17 mudou"; docker ps --filter ancestor=postgres:17; exit 1; fi; exit "$test_exit_code"
+~~~
+
+Resultado esperado:
+
+- exit code 0;
+- uma suíte aprovada;
+- 9 testes aprovados;
+- nenhuma falha;
+- os cinco novos cenários de idempotência reportados como aprovados:
+
+~~~text
+replays an approved decision without duplicating its effects
+replays a denied decision without creating a loan
+rejects an idempotency key reused with a different payload
+processes distinct intentions when the same borrower uses different keys
+scopes the same idempotency key independently for each borrower
+~~~
+
+O cenário de rollback também deve aparecer com o nome atualizado:
+
+~~~text
+rolls back the loan, aggregates and idempotency when persisting the response fails
+~~~
+
+A comparação dos IDs preserva qualquer PostgreSQL 17 que já estivesse ativo e detecta somente a permanência de um container adicional.
+
+### Replay de uma aprovação
+
+O cenário usa:
+
+~~~text
+borrower_id = borrower-retry-approved
+uf = GO
+amount_minor_units = 500000
+idempotency_key = approval-key
+~~~
+
+A mesma operação é executada duas vezes. Resultado esperado:
+
+- os dois resultados são exatamente iguais, inclusive loanId e policyVersion;
+- existe apenas um registro em loans;
+- TOTAL permanece em 500000, sem duplicação;
+- existe apenas um registro em idempotency_requests;
+- o registro possui decision igual a APPROVED, o mesmo loanId, policy_version igual a 1 e request_hash SHA-256 com 64 caracteres hexadecimais.
+
+Isso comprova que o retry concluído recupera a resposta persistida em vez de recalcular a decisão ou repetir seus efeitos.
+
+### Replay de uma negativa
+
+O cenário usa:
+
+~~~text
+borrower_id = borrower-retry-denied
+uf = GO
+amount_minor_units = 1000001
+idempotency_key = denial-key
+~~~
+
+A operação é executada duas vezes. Resultado esperado:
+
+~~~text
+decision = DENIED
+quantidade de loans = 0
+quantidade de idempotency_requests = 1
+~~~
+
+O replay precisa ser exatamente igual à negativa original. A resposta negada é persistida com policy_version, mas sem loan_id.
+
+### Conflito por payload diferente
+
+Primeira intenção:
+
+~~~text
+borrower_id = borrower-conflict
+uf = GO
+amount_minor_units = 400000
+idempotency_key = reused-key
+~~~
+
+Reutilização indevida:
+
+~~~text
+borrower_id = borrower-conflict
+uf = GO
+amount_minor_units = 300000
+idempotency_key = reused-key
+~~~
+
+Resultado esperado:
+
+~~~text
+IdempotencyConflictError
+idempotency key was already used with a different payload
+~~~
+
+O conflito não pode criar um segundo empréstimo. A tabela loans deve continuar com exatamente um registro.
+
+### Chaves diferentes representam intenções diferentes
+
+O mesmo solicitante envia o mesmo payload com first-key e second-key.
+
+Resultado esperado:
+
+~~~text
+duas decisões APPROVED
+quantidade de loans = 2
+quantidade de idempotency_requests = 2
+~~~
+
+Isso confirma que uma nova intenção deve usar uma nova chave e será processada independentemente.
+
+### A chave é isolada por solicitante
+
+Dois solicitantes diferentes usam shared-key com o mesmo payload.
+
+Resultado esperado:
+
+~~~text
+duas decisões APPROVED
+quantidade de idempotency_requests = 2
+~~~
+
+A identidade idempotente é composta por borrower_id e idempotency_key. Portanto, a mesma chave textual não cria conflito entre solicitantes diferentes.
+
+### Hash e resposta persistida
+
+O hash é SHA-256 determinístico dos campos relevantes já validados:
+
+~~~text
+borrowerId
+uf
+amount representado como string inteira
+~~~
+
+O banco persiste:
+
+~~~text
+borrower_id
+idempotency_key
+request_hash
+decision
+message
+loan_id, somente quando aprovado
+policy_version
+created_at
+~~~
+
+A chave e o hash identificam a intenção; decision, message, loan_id e policy_version permitem reconstruir exatamente o resultado original.
+
+### Rollback conjunto
+
+O cenário instala temporariamente um trigger que falha ao inserir em idempotency_requests, depois que o caminho aprovado já tentou criar o empréstimo e atualizar a exposição.
+
+Erro esperado:
+
+~~~text
+forced idempotency insert failure
+~~~
+
+Estado esperado após o rollback:
+
+~~~text
+quantidade de loans = 0
+quantidade de idempotency_requests = 0
+TOTAL = 0
+linha de GO ausente
+~~~
+
+Isso comprova que o registro idempotente participa da mesma transação do empréstimo e dos agregados.
+
+### Escopo comprovado e limitações
+
+A suíte comprova retries sequenciais já concluídos, conflito por payload e atomicidade diante de uma falha injetada. Ela ainda não comprova duas requisições simultâneas com a mesma chave. A coordenação concorrente será tratada e testada na Tarefa 14.
+
+A validação do header, o mapeamento do conflito para HTTP 409 e a resposta pública sem policy_version pertencem à Tarefa 13.
+
+A expiração automática dos registros idempotentes não foi implementada porque o prazo de retenção permanece em aberto na PRD 0.8.
+
+### Verificação completa do projeto
+
+~~~bash
+npm test
+npm run typecheck
+npm run build
+~~~
+
+Todos os comandos devem terminar com exit code 0. A suíte completa requer Docker.
+
+Após o build, confirme que o suporte de testes continua fora do artefato de produção:
+
+~~~bash
+test ! -e dist/test-support/postgres-test-harness.js && echo "Harness ausente do build de produção"
+~~~
+
+Resultado esperado:
+
+~~~text
+Harness ausente do build de produção
+~~~
+
+### Limpeza segura
+
+Os testes recriam o schema public antes de cada cenário e encerram pool e container no afterAll. Se uma execução for interrompida abruptamente, liste os containers:
+
+~~~bash
+docker ps --filter ancestor=postgres:17
+~~~
+
+Não interrompa containers preexistentes. Remova somente um container comprovadamente criado pela execução interrompida.
+
+### Por que a Tarefa 12 ainda não está no Postman
+
+A idempotência está implementada no caso de uso e no PostgreSQL, mas o endpoint POST /loan-decisions somente será exposto na Tarefa 13.
+
+Adicionar agora requests com Idempotency-Key representaria uma interface HTTP inexistente. Replay, conflito HTTP 409 e isolamento entre chaves serão acrescentados à coleção quando a rota estiver disponível.
+

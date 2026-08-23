@@ -1,0 +1,142 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1050" viewBox="0 0 1600 1050">
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M1,1 L11,6 L1,11 Z" fill="#202124"/>
+    </marker>
+    <marker id="arrowBlue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M1,1 L11,6 L1,11 Z" fill="#2764b7"/>
+    </marker>
+    <filter id="rough" x="-5%" y="-5%" width="110%" height="110%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.012" numOctaves="1" seed="7" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="1.1"/>
+    </filter>
+    <style>
+      .title { font: 700 30px "Comic Sans MS", "Segoe Print", cursive; fill:#202124; }
+      .label { font: 22px "Comic Sans MS", "Segoe Print", cursive; fill:#202124; }
+      .small { font: 17px "Comic Sans MS", "Segoe Print", cursive; fill:#35363a; }
+      .tiny { font: 15px "Comic Sans MS", "Segoe Print", cursive; fill:#35363a; }
+      .box { stroke:#202124; stroke-width:3.2; rx:22; ry:22; filter:url(#rough); }
+      .line { fill:none; stroke:#202124; stroke-width:3.1; marker-end:url(#arrow); filter:url(#rough); }
+      .blueLine { fill:none; stroke:#2764b7; stroke-width:3.1; marker-end:url(#arrowBlue); filter:url(#rough); }
+      .dash { stroke-dasharray:10 8; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1050" fill="#fffdf8"/>
+  <text x="800" y="48" text-anchor="middle" class="title">Fluxo de aprovação e liberação do empréstimo</text>
+
+  <!-- Request -->
+  <rect x="55" y="118" width="210" height="110" fill="#fff" class="box"/>
+  <text x="160" y="165" text-anchor="middle" class="label">Cliente</text>
+  <text x="160" y="198" text-anchor="middle" class="small">UF + amount</text>
+
+  <rect x="355" y="98" width="290" height="150" fill="#e8f0fe" class="box"/>
+  <text x="500" y="150" text-anchor="middle" class="label">LoanService</text>
+  <text x="500" y="184" text-anchor="middle" class="small">idempotency_key</text>
+  <text x="500" y="214" text-anchor="middle" class="small">recebe e valida o pedido</text>
+  <path d="M265 173 C300 168, 320 170, 355 173" class="line"/>
+
+  <!-- PostgreSQL transaction -->
+  <rect x="710" y="60" width="570" height="810" fill="none" stroke="#2764b7" stroke-width="3.2" stroke-dasharray="13 9" rx="28" ry="28"/>
+  <rect x="735" y="76" width="535" height="340" fill="#eef7ee" class="box"/>
+  <text x="1002" y="108" text-anchor="middle" class="tiny" fill="#2764b7">TRANSAÇÃO ATÔMICA CURTA</text>
+  <text x="1002" y="133" text-anchor="middle" class="small">PostgreSQL — leitura consistente e cálculo</text>
+
+  <rect x="770" y="142" width="465" height="94" fill="#fff" class="box"/>
+  <text x="1002" y="175" text-anchor="middle" class="small">1. Bloqueia os agregados TOTAL e UF</text>
+  <text x="1002" y="207" text-anchor="middle" class="small">2. Lê ACTIVE + PENDING_DISBURSEMENT</text>
+
+  <rect x="770" y="260" width="465" height="120" fill="#fff4d6" class="box"/>
+  <text x="1002" y="294" text-anchor="middle" class="small">3. Calcula o cenário após o pedido</text>
+  <text x="1002" y="326" text-anchor="middle" class="small">(valor_UF + amount) / (total + amount)</text>
+  <text x="1002" y="358" text-anchor="middle" class="small">GO ≤ 10% • SP ≤ 20% • demais ≤ 10%</text>
+
+  <path d="M645 173 C680 169, 700 170, 735 173" class="line"/>
+  <text x="688" y="149" text-anchor="middle" class="tiny">BEGIN</text>
+
+  <!-- Decision -->
+  <polygon points="1002,458 1140,545 1002,632 864,545" fill="#fff4d6" stroke="#202124" stroke-width="3.2" filter="url(#rough)"/>
+  <text x="1002" y="530" text-anchor="middle" class="small">Dentro do</text>
+  <text x="1002" y="560" text-anchor="middle" class="small">limite?</text>
+  <path d="M1002 416 C1000 431,1001 442,1002 458" class="line"/>
+
+  <!-- Denied -->
+  <rect x="465" y="490" width="275" height="110" fill="#fde8e7" class="box"/>
+  <text x="602" y="532" text-anchor="middle" class="label">LOAN_DENIED</text>
+  <text x="602" y="566" text-anchor="middle" class="small">motivo estruturado</text>
+  <path d="M864 545 C820 543,785 544,740 545" class="line"/>
+  <text x="807" y="523" text-anchor="middle" class="small">não</text>
+  <path d="M465 545 C325 545,190 455,160 228" class="line"/>
+
+  <!-- Approved/Pending -->
+  <rect x="850" y="680" width="305" height="165" fill="#e8f0fe" class="box"/>
+  <text x="1002" y="728" text-anchor="middle" class="label">COMMIT</text>
+  <text x="1002" y="756" text-anchor="middle" class="small">cria PENDING_DISBURSEMENT</text>
+  <text x="1002" y="784" text-anchor="middle" class="small">soma em TOTAL + UF</text>
+  <text x="1002" y="812" text-anchor="middle" class="small">grava DISBURSE_LOAN na outbox</text>
+  <text x="1002" y="836" text-anchor="middle" class="tiny">um único commit • exposição reservada</text>
+  <path d="M1002 632 C1002 650,1002 664,1002 680" class="line"/>
+  <text x="1025" y="664" class="small">sim</text>
+
+  <!-- Aggregates inset -->
+  <rect x="1300" y="88" width="250" height="280" fill="#f6f0ff" class="box"/>
+  <text x="1425" y="126" text-anchor="middle" class="label">Agregados</text>
+  <text x="1425" y="160" text-anchor="middle" class="small">TOTAL: 100.000</text>
+  <text x="1425" y="192" text-anchor="middle" class="small">UF:GO: 8.000</text>
+  <text x="1425" y="224" text-anchor="middle" class="small">UF:SP: 18.000</text>
+  <line x1="1332" y1="246" x2="1518" y2="246" stroke="#202124" stroke-width="2"/>
+  <text x="1425" y="278" text-anchor="middle" class="tiny">PENDING → ACTIVE:</text>
+  <text x="1425" y="303" text-anchor="middle" class="tiny">não altera os agregados</text>
+  <text x="1425" y="333" text-anchor="middle" class="tiny">FAILED / PAID_OFF:</text>
+  <text x="1425" y="356" text-anchor="middle" class="tiny">subtrai de TOTAL + UF</text>
+  <path d="M1270 205 C1280 205,1288 205,1300 205" class="blueLine dash"/>
+
+  <!-- Transactional outbox worker -->
+  <rect x="1300" y="520" width="250" height="120" fill="#f6f0ff" class="box"/>
+  <text x="1425" y="559" text-anchor="middle" class="label">Outbox Worker</text>
+  <text x="1425" y="590" text-anchor="middle" class="small">lê após o commit</text>
+  <text x="1425" y="618" text-anchor="middle" class="tiny">retry + chamada idempotente</text>
+  <path d="M1155 720 C1210 700,1250 665,1320 640" class="line"/>
+
+  <!-- External disbursement -->
+  <rect x="1255" y="675" width="285" height="160" fill="#fff" class="box"/>
+  <text x="1397" y="716" text-anchor="middle" class="label">Agente externo</text>
+  <text x="1397" y="750" text-anchor="middle" class="small">processa a liberação</text>
+  <text x="1397" y="782" text-anchor="middle" class="small">external_disbursement_id</text>
+  <text x="1397" y="812" text-anchor="middle" class="tiny">chamada fora da transação</text>
+  <path d="M1397 640 C1397 650,1397 662,1397 675" class="line"/>
+
+  <!-- Webhook -->
+  <rect x="1178" y="902" width="360" height="105" fill="#eef7ee" class="box"/>
+  <text x="1358" y="940" text-anchor="middle" class="label">Webhook idempotente</text>
+  <text x="1358" y="973" text-anchor="middle" class="small">assinatura validada + event_id único</text>
+  <path d="M1397 835 C1395 860,1380 878,1360 902" class="line"/>
+
+  <!-- State outcomes -->
+  <rect x="785" y="904" width="270" height="100" fill="#e7f6ec" class="box"/>
+  <text x="920" y="944" text-anchor="middle" class="label">Sucesso → ACTIVE</text>
+  <text x="920" y="976" text-anchor="middle" class="tiny">agregados não mudam</text>
+
+  <rect x="430" y="904" width="300" height="100" fill="#fde8e7" class="box"/>
+  <text x="580" y="944" text-anchor="middle" class="label">Falha → FAILED</text>
+  <text x="580" y="976" text-anchor="middle" class="tiny">subtrai de TOTAL + UF</text>
+
+  <path d="M1178 953 C1135 954,1100 954,1055 954" class="line"/>
+  <path d="M1178 974 C1015 1028,865 1026,730 974" class="line"/>
+
+  <!-- Reconciliation -->
+  <rect x="55" y="690" width="305" height="145" fill="#f6f0ff" class="box"/>
+  <text x="207" y="730" text-anchor="middle" class="label">Reconciliação periódica</text>
+  <text x="207" y="764" text-anchor="middle" class="small">busca pendências antigas</text>
+  <text x="207" y="795" text-anchor="middle" class="small">e consulta o agente externo</text>
+  <text x="207" y="821" text-anchor="middle" class="tiny">cobre webhook atrasado/perdido</text>
+  <path d="M360 760 C530 840,1050 875,1255 790" class="blueLine dash"/>
+
+  <!-- Policy -->
+  <rect x="55" y="355" width="300" height="170" fill="#fff4d6" class="box"/>
+  <text x="205" y="395" text-anchor="middle" class="label">Política configurável</text>
+  <text x="205" y="430" text-anchor="middle" class="small">SP: 20%</text>
+  <text x="205" y="460" text-anchor="middle" class="small">demais UFs: 10%</text>
+  <text x="205" y="492" text-anchor="middle" class="tiny">permite mudança futura</text>
+  <path d="M355 433 C525 395,675 370,770 330" class="blueLine dash"/>
+</svg>

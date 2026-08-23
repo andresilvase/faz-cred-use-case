@@ -1,0 +1,210 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1240" viewBox="0 0 1800 1240">
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M1,1 L11,6 L1,11 Z" fill="#202124"/>
+    </marker>
+    <marker id="arrowBlue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M1,1 L11,6 L1,11 Z" fill="#2764b7"/>
+    </marker>
+    <filter id="rough" x="-5%" y="-5%" width="110%" height="110%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.01" numOctaves="1" seed="9" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="0.9"/>
+    </filter>
+    <style>
+      .title { font: 700 30px "Comic Sans MS","Segoe Print",cursive; fill:#202124; }
+      .lane { font: 700 20px "Comic Sans MS","Segoe Print",cursive; fill:#334155; }
+      .label { font: 21px "Comic Sans MS","Segoe Print",cursive; fill:#202124; }
+      .small { font: 17px "Comic Sans MS","Segoe Print",cursive; fill:#35363a; }
+      .tiny { font: 14px "Comic Sans MS","Segoe Print",cursive; fill:#475569; }
+      .box { stroke:#202124; stroke-width:3; rx:18; ry:18; filter:url(#rough); }
+      .line { fill:none; stroke:#202124; stroke-width:3; marker-end:url(#arrow); filter:url(#rough); }
+      .blue { fill:none; stroke:#2764b7; stroke-width:3; marker-end:url(#arrowBlue); filter:url(#rough); }
+      .dash { stroke-dasharray:10 8; }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1240" fill="#fffdf8"/>
+  <text x="900" y="44" text-anchor="middle" class="title">Backend seguro — contratação e liberação de empréstimo</text>
+  <text x="900" y="72" text-anchor="middle" class="tiny">Usuário já autenticado e autorizado • API + worker + webhook + reconciliação na mesma instância • PostgreSQL como fonte de verdade</text>
+
+  <!-- Lanes -->
+  <rect x="32" y="94" width="1240" height="420" fill="#f8fbff" stroke="#94a3b8" stroke-width="2" rx="22"/>
+  <text x="55" y="126" class="lane">1. Requisição síncrona</text>
+  <rect x="32" y="530" width="1240" height="305" fill="#faf8ff" stroke="#94a3b8" stroke-width="2" rx="22"/>
+  <text x="55" y="562" class="lane">2. Liberação assíncrona</text>
+  <rect x="32" y="852" width="1240" height="350" fill="#f8fff9" stroke="#94a3b8" stroke-width="2" rx="22"/>
+  <text x="55" y="884" class="lane">3. Webhook e recuperação</text>
+
+  <!-- Request entry -->
+  <rect x="70" y="162" width="205" height="130" fill="#fff" class="box"/>
+  <text x="172" y="201" text-anchor="middle" class="label">POST /loans</text>
+  <text x="172" y="233" text-anchor="middle" class="small">UF + amount</text>
+  <text x="172" y="262" text-anchor="middle" class="tiny">Idempotency-Key</text>
+
+  <rect x="330" y="145" width="260" height="165" fill="#e8f0fe" class="box"/>
+  <text x="460" y="183" text-anchor="middle" class="label">API boundary</text>
+  <text x="460" y="201" text-anchor="middle" class="tiny">componente HTTP — mesma aplicação</text>
+  <text x="460" y="224" text-anchor="middle" class="small">rate limit + tamanho máximo</text>
+  <text x="460" y="250" text-anchor="middle" class="small">schema, UF e amount &gt; 0</text>
+  <text x="460" y="276" text-anchor="middle" class="tiny">gera request_id / correlation_id</text>
+  <text x="460" y="299" text-anchor="middle" class="tiny">rejeita entrada inválida → 4xx</text>
+  <path d="M275 227 C292 226,312 226,330 227" class="line"/>
+
+  <rect x="650" y="145" width="280" height="165" fill="#fff4d6" class="box"/>
+  <text x="790" y="183" text-anchor="middle" class="label">Idempotência</text>
+  <text x="790" y="214" text-anchor="middle" class="small">user_id + Idempotency-Key</text>
+  <text x="790" y="244" text-anchor="middle" class="small">mesma chave + mesmo payload</text>
+  <text x="790" y="274" text-anchor="middle" class="tiny">existente → devolve resposta salva</text>
+  <text x="790" y="298" text-anchor="middle" class="tiny">payload diferente → conflito 409</text>
+  <path d="M590 227 C610 226,630 226,650 227" class="line"/>
+
+  <!-- Transaction -->
+  <rect x="970" y="118" width="270" height="690" fill="none" stroke="#2764b7" stroke-width="3" stroke-dasharray="12 8" rx="25"/>
+  <text x="1105" y="146" text-anchor="middle" class="tiny" fill="#2764b7">BEGIN — TRANSAÇÃO CURTA</text>
+  <rect x="990" y="164" width="230" height="80" fill="#eef7ee" class="box"/>
+  <text x="1105" y="193" text-anchor="middle" class="small">Bloqueia TOTAL + UF</text>
+  <text x="1105" y="220" text-anchor="middle" class="tiny">SELECT ... FOR UPDATE</text>
+
+  <rect x="990" y="262" width="230" height="100" fill="#fff4d6" class="box"/>
+  <text x="1105" y="290" text-anchor="middle" class="small">Calcula exposição futura</text>
+  <text x="1105" y="319" text-anchor="middle" class="tiny">(UF + amount)/(TOTAL + amount)</text>
+  <text x="1105" y="345" text-anchor="middle" class="tiny">aplica política versionada</text>
+
+  <polygon points="1105,379 1195,427 1105,475 1015,427" fill="#fff4d6" stroke="#202124" stroke-width="3" filter="url(#rough)"/>
+  <text x="1105" y="421" text-anchor="middle" class="tiny">limite</text>
+  <text x="1105" y="441" text-anchor="middle" class="tiny">respeitado?</text>
+  <path d="M930 227 C950 226,970 225,990 205" class="line"/>
+  <path d="M1105 244 L1105 262" class="line"/>
+  <path d="M1105 362 L1105 379" class="line"/>
+
+  <!-- Denied -->
+  <rect x="650" y="365" width="280" height="115" fill="#fde8e7" class="box"/>
+  <text x="790" y="401" text-anchor="middle" class="label">Negado → ROLLBACK</text>
+  <text x="790" y="431" text-anchor="middle" class="small">motivo + regra aplicada</text>
+  <text x="790" y="458" text-anchor="middle" class="tiny">salva resposta idempotente e retorna 422</text>
+  <path d="M1015 427 C985 426,960 425,930 423" class="line"/>
+  <text x="966" y="407" text-anchor="middle" class="tiny">não</text>
+
+  <!-- Commit -->
+  <rect x="970" y="548" width="270" height="238" fill="#e8f0fe" class="box"/>
+  <text x="1105" y="582" text-anchor="middle" class="label">Aprovado → COMMIT</text>
+  <text x="1105" y="615" text-anchor="middle" class="small">loan = PENDING_DISBURSEMENT</text>
+  <text x="1105" y="645" text-anchor="middle" class="small">atualiza TOTAL + UF</text>
+  <text x="1105" y="675" text-anchor="middle" class="small">insere outbox DISBURSE_LOAN</text>
+  <text x="1105" y="705" text-anchor="middle" class="small">salva resposta idempotente</text>
+  <line x1="995" y1="725" x2="1215" y2="725" stroke="#202124" stroke-width="2"/>
+  <text x="1105" y="750" text-anchor="middle" class="tiny">um único commit PostgreSQL</text>
+  <text x="1105" y="772" text-anchor="middle" class="tiny">retorna 202 + loan_id</text>
+  <path d="M1195 427 C1245 470,1250 520,1190 548" class="line"/>
+  <text x="1224" y="492" class="tiny">sim</text>
+
+  <!-- Async worker -->
+  <rect x="650" y="585" width="260" height="165" fill="#f6f0ff" class="box"/>
+  <text x="780" y="622" text-anchor="middle" class="label">Outbox worker</text>
+  <text x="780" y="642" text-anchor="middle" class="tiny">processo em background — mesma aplicação</text>
+  <text x="780" y="668" text-anchor="middle" class="small">lê evento confirmado</text>
+  <text x="780" y="694" text-anchor="middle" class="small">retry + backoff</text>
+  <text x="780" y="719" text-anchor="middle" class="tiny">claim seguro / SKIP LOCKED</text>
+  <text x="780" y="741" text-anchor="middle" class="tiny">não segura transação do pedido</text>
+  <path d="M970 667 C950 667,930 667,910 667" class="line"/>
+
+  <rect x="330" y="585" width="260" height="165" fill="#fff" class="box"/>
+  <text x="460" y="622" text-anchor="middle" class="label">Parceiro externo</text>
+  <text x="460" y="653" text-anchor="middle" class="small">solicita a liberação</text>
+  <text x="460" y="683" text-anchor="middle" class="small">chave idempotente = loan_id</text>
+  <text x="460" y="712" text-anchor="middle" class="tiny">retorna external_disbursement_id</text>
+  <text x="460" y="736" text-anchor="middle" class="tiny">timeout não significa falha definitiva</text>
+  <path d="M650 667 C630 667,610 667,590 667" class="line"/>
+
+  <rect x="70" y="585" width="205" height="165" fill="#fff4d6" class="box"/>
+  <text x="172" y="622" text-anchor="middle" class="label">Atualiza controle</text>
+  <text x="172" y="654" text-anchor="middle" class="small">external_id</text>
+  <text x="172" y="682" text-anchor="middle" class="small">tentativas + próximo retry</text>
+  <text x="172" y="711" text-anchor="middle" class="tiny">estado segue PENDING</text>
+  <text x="172" y="735" text-anchor="middle" class="tiny">até confirmação externa</text>
+  <path d="M330 667 C310 667,295 667,275 667" class="line"/>
+
+  <!-- Webhook -->
+  <rect x="70" y="925" width="235" height="175" fill="#fff" class="box"/>
+  <text x="187" y="962" text-anchor="middle" class="label">POST /webhooks</text>
+  <text x="187" y="982" text-anchor="middle" class="tiny">HTTP handler — mesma aplicação</text>
+  <text x="187" y="1007" text-anchor="middle" class="small">valida assinatura + timestamp</text>
+  <text x="187" y="1033" text-anchor="middle" class="small">limita tamanho do body</text>
+  <text x="187" y="1059" text-anchor="middle" class="tiny">event_id único contra replay</text>
+  <text x="187" y="1082" text-anchor="middle" class="tiny">body bruto usado na assinatura</text>
+
+  <rect x="365" y="925" width="250" height="175" fill="#eef7ee" class="box"/>
+  <text x="490" y="962" text-anchor="middle" class="label">Processa em transação</text>
+  <text x="490" y="994" text-anchor="middle" class="small">bloqueia o loan</text>
+  <text x="490" y="1022" text-anchor="middle" class="small">valida transição de estado</text>
+  <text x="490" y="1050" text-anchor="middle" class="tiny">registra event_id antes de responder</text>
+  <text x="490" y="1076" text-anchor="middle" class="tiny">evento repetido → 200 sem novo efeito</text>
+  <path d="M305 1012 C325 1012,345 1012,365 1012" class="line"/>
+
+  <polygon points="750,925 855,1012 750,1099 645,1012" fill="#fff4d6" stroke="#202124" stroke-width="3" filter="url(#rough)"/>
+  <text x="750" y="995" text-anchor="middle" class="small">resultado</text>
+  <text x="750" y="1024" text-anchor="middle" class="small">confirmado?</text>
+  <text x="750" y="1051" text-anchor="middle" class="tiny">sucesso / falha</text>
+  <path d="M615 1012 C625 1012,635 1012,645 1012" class="line"/>
+
+  <rect x="905" y="890" width="315" height="120" fill="#e7f6ec" class="box"/>
+  <text x="1062" y="927" text-anchor="middle" class="label">Sucesso → ACTIVE</text>
+  <text x="1062" y="958" text-anchor="middle" class="small">agregados não mudam</text>
+  <text x="1062" y="985" text-anchor="middle" class="tiny">commit + resposta 200</text>
+  <path d="M828 976 C850 964,878 955,905 950" class="line"/>
+
+  <rect x="905" y="1042" width="315" height="125" fill="#fde8e7" class="box"/>
+  <text x="1062" y="1080" text-anchor="middle" class="label">Falha definitiva → FAILED</text>
+  <text x="1062" y="1111" text-anchor="middle" class="small">subtrai amount de TOTAL + UF</text>
+  <text x="1062" y="1139" text-anchor="middle" class="tiny">mesma transação + resposta 200</text>
+  <path d="M828 1048 C850 1064,878 1080,905 1094" class="line"/>
+
+  <rect x="365" y="1125" width="430" height="58" fill="#f6f0ff" class="box"/>
+  <text x="580" y="1148" text-anchor="middle" class="small">Reconciliação: PENDING antigo → consulta parceiro</text>
+  <text x="580" y="1173" text-anchor="middle" class="tiny">usa o mesmo processador de transição do webhook</text>
+  <path d="M580 1125 C560 1108,540 1100,520 1097" class="blue dash"/>
+
+  <!-- Observability / security side panel -->
+  <rect x="1310" y="94" width="455" height="1108" fill="#fffaf0" stroke="#202124" stroke-width="3" rx="24" filter="url(#rough)"/>
+  <text x="1537" y="134" text-anchor="middle" class="lane">Segurança, logs e observabilidade</text>
+
+  <rect x="1340" y="165" width="395" height="180" fill="#e8f0fe" class="box"/>
+  <text x="1537" y="203" text-anchor="middle" class="label">Logs estruturados</text>
+  <text x="1537" y="236" text-anchor="middle" class="small">request_id • loan_id • event_id</text>
+  <text x="1537" y="266" text-anchor="middle" class="small">etapa • status • duração • erro</text>
+  <text x="1537" y="297" text-anchor="middle" class="tiny">nunca registrar token, segredo ou payload completo</text>
+  <text x="1537" y="322" text-anchor="middle" class="tiny">mascarar CPF, conta, telefone e demais PII</text>
+
+  <rect x="1340" y="375" width="395" height="175" fill="#eef7ee" class="box"/>
+  <text x="1537" y="414" text-anchor="middle" class="label">Auditoria imutável</text>
+  <text x="1537" y="447" text-anchor="middle" class="small">quem / quando / decisão / motivo</text>
+  <text x="1537" y="477" text-anchor="middle" class="small">valores antes e depois</text>
+  <text x="1537" y="507" text-anchor="middle" class="tiny">versão da política + transições de status</text>
+  <text x="1537" y="532" text-anchor="middle" class="tiny">retenção e acesso restrito</text>
+
+  <rect x="1340" y="580" width="395" height="170" fill="#f6f0ff" class="box"/>
+  <text x="1537" y="619" text-anchor="middle" class="label">Banco protegido</text>
+  <text x="1537" y="652" text-anchor="middle" class="small">queries parametrizadas</text>
+  <text x="1537" y="682" text-anchor="middle" class="small">usuário da aplicação com menor privilégio</text>
+  <text x="1537" y="712" text-anchor="middle" class="tiny">TLS, secrets fora do código e backups testados</text>
+  <text x="1537" y="736" text-anchor="middle" class="tiny">constraints e índices únicos como última barreira</text>
+
+  <rect x="1340" y="780" width="395" height="178" fill="#fff4d6" class="box"/>
+  <text x="1537" y="819" text-anchor="middle" class="label">Métricas e alertas</text>
+  <text x="1537" y="852" text-anchor="middle" class="small">latência • erros • locks • retries</text>
+  <text x="1537" y="882" text-anchor="middle" class="small">PENDING envelhecido • webhook inválido</text>
+  <text x="1537" y="912" text-anchor="middle" class="tiny">alerta para divergência dos agregados</text>
+  <text x="1537" y="936" text-anchor="middle" class="tiny">dashboard sem dados pessoais</text>
+
+  <rect x="1340" y="990" width="395" height="165" fill="#fde8e7" class="box"/>
+  <text x="1537" y="1029" text-anchor="middle" class="label">Falhas controladas</text>
+  <text x="1537" y="1062" text-anchor="middle" class="small">timeouts + circuit breaker no parceiro</text>
+  <text x="1537" y="1092" text-anchor="middle" class="small">retry somente em falhas recuperáveis</text>
+  <text x="1537" y="1122" text-anchor="middle" class="tiny">dead-letter/manual review após limite</text>
+  <text x="1537" y="1147" text-anchor="middle" class="tiny">PENDING mantém a exposição reservada</text>
+
+  <!-- log taps -->
+  <path d="M590 175 C870 90,1120 92,1340 235" class="blue dash"/>
+  <path d="M1240 670 C1280 660,1300 650,1340 650" class="blue dash"/>
+  <path d="M1220 1105 C1280 1080,1300 1050,1340 1048" class="blue dash"/>
+</svg>

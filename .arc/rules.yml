@@ -262,8 +262,8 @@ rules:
     severity: high
 
     statement: >
-      Domain code must not depend on HTTP, PostgreSQL, Express,
-      environment variables, or infrastructure implementations.
+      Domain code must not depend on application, HTTP, infrastructure,
+      Express, or PostgreSQL components.
 
     triggers:
       paths:

@@ -12,7 +12,8 @@
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check:architecture": "node scripts/check-domain-imports.mjs"
   },
   "dependencies": {
     "express": "^5.1.0",

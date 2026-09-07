@@ -338,7 +338,15 @@ rules:
     enforcement:
       mode: scanner
       scanner: gitleaks
-      command: gitleaks git --redact --no-banner --verbose .
+
+      local:
+        command: gitleaks git --redact --no-banner --verbose .
+        strategy: full-history
+
+      ci:
+        workflow: .github/workflows/arc-gate.yml
+        strategy: pull-request-range
+
       produces:
         - scanned-commits
         - detected-secrets

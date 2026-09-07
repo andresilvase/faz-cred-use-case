@@ -292,7 +292,8 @@ rules:
       command: node scripts/check-domain-imports.mjs
       produces:
         - scanned-files
-        - forbidden-imports
+        - dependency-violations
+        - expression-violations
       blocking: true
 
   - id: no-sensitive-data-in-logs
@@ -337,7 +338,9 @@ rules:
     enforcement:
       mode: scanner
       scanner: gitleaks
+      command: gitleaks git --redact --no-banner --verbose .
       produces:
+        - scanned-commits
         - detected-secrets
         - affected-files
       blocking: true

@@ -105,6 +105,77 @@ function collectImports(sourceFile) {
     return imports;
 }
 
+function isProcessReference(node) {
+    if (ts.isIdentifier(node) && node.text === "process") {
+        return true;
+    }
+
+    if (
+        ts.isPropertyAccessExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "globalThis" &&
+        node.name.text === "process"
+    ) {
+        return true;
+    }
+
+    if (
+        ts.isElementAccessExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "globalThis" &&
+        node.argumentExpression &&
+        ts.isStringLiteralLike(node.argumentExpression) &&
+        node.argumentExpression.text === "process"
+    ) {
+        return true;
+    }
+
+    return false;
+}
+
+function isProcessEnvAccess(node) {
+    if (
+        ts.isPropertyAccessExpression(node) &&
+        isProcessReference(node.expression) &&
+        node.name.text === "env"
+    ) {
+        return true;
+    }
+
+    if (
+        ts.isElementAccessExpression(node) &&
+        isProcessReference(node.expression) &&
+        node.argumentExpression &&
+        ts.isStringLiteralLike(node.argumentExpression) &&
+        node.argumentExpression.text === "env"
+    ) {
+        return true;
+    }
+
+    return false;
+}
+
+function collectForbiddenExpressions(sourceFile, forbiddenExpressions) {
+    const violations = [];
+
+    function visit(node) {
+        if (
+            forbiddenExpressions.includes("process.env") &&
+            isProcessEnvAccess(node)
+        ) {
+            violations.push({
+                expression: "process.env",
+                position: node.getStart(sourceFile),
+            });
+        }
+
+        ts.forEachChild(node, visit);
+    }
+
+    visit(sourceFile);
+    return violations;
+}
+
 function isInside(candidatePath, directoryPath) {
     const relative = path.relative(directoryPath, candidatePath);
 
@@ -146,6 +217,7 @@ const scopeDirectories = rule.scope.paths.map((pattern) =>
 
 const forbiddenImports = rule.constraints.forbidden_imports ?? [];
 const forbiddenPackages = rule.constraints.forbidden_packages ?? [];
+const forbiddenExpressions = rule.constraints.forbidden_expressions ?? [];
 
 const sourceFiles = scopeDirectories.flatMap((directory) => {
     if (!fs.existsSync(directory)) {
@@ -186,9 +258,24 @@ for (const file of sourceFiles) {
             violations.push({
                 file: path.relative(repositoryRoot, file),
                 line: location.line + 1,
-                specifier: importedModule.specifier,
+                description: `imports forbidden dependency "${importedModule.specifier}"`,
             });
         }
+    }
+
+    for (const forbiddenExpression of collectForbiddenExpressions(
+        sourceFile,
+        forbiddenExpressions,
+    )) {
+        const location = sourceFile.getLineAndCharacterOfPosition(
+            forbiddenExpression.position,
+        );
+
+        violations.push({
+            file: path.relative(repositoryRoot, file),
+            line: location.line + 1,
+            description: `uses forbidden expression "${forbiddenExpression.expression}"`,
+        });
     }
 }
 
@@ -197,7 +284,7 @@ if (violations.length > 0) {
 
     for (const violation of violations) {
         console.error(
-            `- ${violation.file}:${violation.line} imports "${violation.specifier}"`,
+            `- ${violation.file}:${violation.line} ${violation.description}`,
         );
     }
 

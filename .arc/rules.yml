@@ -262,8 +262,8 @@ rules:
     severity: high
 
     statement: >
-      Domain code must not depend on application, HTTP, infrastructure,
-      Express, or PostgreSQL components.
+      Domain code must not depend on HTTP, PostgreSQL, Express,
+      environment variables, or infrastructure implementations.
 
     triggers:
       paths:
@@ -281,6 +281,11 @@ rules:
       forbidden_packages:
         - express
         - pg
+        - process
+        - node:process
+
+      forbidden_expressions:
+        - "process.env"
 
     enforcement:
       mode: static-analysis

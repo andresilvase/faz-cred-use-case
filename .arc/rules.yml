@@ -4,7 +4,7 @@ repository:
   name: faz-cred-use-case
   service: loan-decision-service
   purpose: >
-    Decide and persist loan tokenize approvals without violating the active,
+    Decide and persist loan approvals without violating the active,
     versioned geographic concentration policy.
 
 rules:

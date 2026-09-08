@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check:architecture": "node scripts/check-domain-imports.mjs"
+    "check:architecture": "node scripts/check-domain-imports.mjs",
+    "arc:validate": "node scripts/validate-rules.mjs"
   },
   "dependencies": {
     "express": "^5.1.0",
@@ -24,6 +25,7 @@
     "@types/express": "^5.0.3",
     "@types/node": "^24.1.0",
     "@types/pg": "^8.20.2",
+    "ajv": "^8.20.0",
     "tsx": "^4.20.3",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4",

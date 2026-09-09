@@ -95,3 +95,17 @@ jobs:
 
       - name: Validate Arc Gate rules
         run: npm run arc:validate
+
+  gate-integrity:
+    name: Gate integrity
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Check gate integrity
+        run: npm run arc:integrity -- "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}"

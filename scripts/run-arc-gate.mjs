@@ -1,7 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { minimatch } from "minimatch";
-import YAML from "yaml";
+import { loadRules } from "./lib/load-rules.mjs";
 
 const [, , baseSha, headSha = "HEAD"] = process.argv;
 
@@ -10,7 +9,14 @@ if (!baseSha) {
     process.exit(2);
 }
 
-const rulesDocument = YAML.parse(readFileSync(".arc/rules.yml", "utf8"));
+let rulesDocument;
+
+try {
+    rulesDocument = loadRules();
+} catch (error) {
+    console.error(`[arc-gate] FAILED: ${error.message}`);
+    process.exit(1);
+}
 
 const changedFiles = execFileSync(
     "git",

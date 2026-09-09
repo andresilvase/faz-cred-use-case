@@ -23,6 +23,8 @@ const protectedPatterns = [
     /^scripts\/validate-rules\.mjs$/,
     /^scripts\/check-domain-imports\.mjs$/,
     /^scripts\/check-gate-integrity\.mjs$/,
+    /^scripts\/lib\/load-rules\.mjs$/,
+    /^scripts\/run-arc-gate\.mjs$/,
 ];
 
 const protectedFiles = changedFiles.filter((file) =>

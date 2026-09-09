@@ -1,0 +1,354 @@
+version: 1
+
+repository:
+  name: faz-cred-use-case
+  service: loan-decision-service
+  purpose: >
+    Decide and persist loan approvals without violating the active,
+    versioned geographic concentration policy.
+
+rules:
+  - id: concentration-policy
+    type: domain-invariant
+    category: business
+    severity: critical
+
+    statement: >
+      A loan must not be approved when its projected state exposure
+      exceeds the limit defined by the active policy.
+
+    triggers:
+      paths:
+        - "src/domain/**"
+        - "src/application/**"
+        - "src/infrastructure/database/**"
+        - "PRD-MVP-Loan-Decision.md"
+
+    evidence:
+      implementation:
+        - src/domain/concentration-policy.ts
+        - src/domain/loan-decision.ts
+      tests:
+        - src/domain/concentration-policy.test.ts
+        - src/domain/loan-decision.test.ts
+
+    enforcement:
+      mode: test
+      command: >
+        npx vitest run
+        src/domain/concentration-policy.test.ts
+        src/domain/loan-decision.test.ts
+      blocking: true
+
+  - id: bootstrap-boundary
+    type: domain-invariant
+    category: business
+    severity: critical
+
+    statement: >
+      Bootstrap rules must apply only while projected total exposure is
+      below the policy bootstrap threshold. At or above that threshold,
+      percentage concentration rules must apply.
+
+    triggers:
+      paths:
+        - "src/domain/**"
+        - "src/application/**"
+        - "src/infrastructure/database/**"
+        - "PRD-MVP-Loan-Decision.md"
+
+    evidence:
+      implementation:
+        - src/domain/bootstrap-loan-decision.ts
+        - src/domain/loan-decision.ts
+      tests:
+        - src/domain/bootstrap-loan-decision.test.ts
+        - src/domain/loan-decision.test.ts
+
+    enforcement:
+      mode: test
+      command: >
+        npx vitest run
+        src/domain/bootstrap-loan-decision.test.ts
+        src/domain/loan-decision.test.ts
+      blocking: true
+
+  - id: denied-decision-has-no-financial-side-effects
+    type: system-invariant
+    category: consistency
+    severity: critical
+
+    statement: >
+      A denied decision must not create a loan or change total or
+      state exposure.
+
+    triggers:
+      paths:
+        - "src/domain/**"
+        - "src/application/**"
+        - "src/infrastructure/database/**"
+
+    evidence:
+      implementation:
+        - src/application/persist-approved-loan.ts
+        - src/infrastructure/database/postgres-approved-loan-transaction.ts
+      tests:
+        - src/application/persist-approved-loan.test.ts
+
+    enforcement:
+      mode: test
+      command: >
+        npx vitest run
+        src/application/persist-approved-loan.test.ts
+      blocking: true
+
+  - id: approval-is-atomic
+    type: system-invariant
+    category: consistency
+    severity: critical
+
+    statement: >
+      The loan, exposure aggregates, idempotency result, and policy version
+      used for an approval must be persisted in one atomic transaction.
+
+    triggers:
+      paths:
+        - "src/application/**"
+        - "src/infrastructure/database/**"
+
+    evidence:
+      implementation:
+        - src/application/approved-loan-transaction.ts
+        - src/application/persist-approved-loan.ts
+        - src/infrastructure/database/postgres-approved-loan-transaction.ts
+      tests:
+        - src/application/persist-approved-loan.test.ts
+        - src/infrastructure/database/postgres-approved-loan-transaction.test.ts
+
+    enforcement:
+      mode: test
+      command: >
+        npx vitest run
+        src/application/persist-approved-loan.test.ts
+        src/infrastructure/database/postgres-approved-loan-transaction.test.ts
+      blocking: true
+
+  - id: idempotent-retry
+    type: contract-invariant
+    category: reliability
+    severity: critical
+
+    statement: >
+      Reusing an idempotency key with the same payload must return the
+      original result without creating another loan.
+
+    triggers:
+      paths:
+        - "src/application/**"
+        - "src/interfaces/http/**"
+        - "src/infrastructure/database/**"
+
+    evidence:
+      implementation:
+        - src/application/persist-approved-loan.ts
+        - src/interfaces/http/create-app.ts
+        - src/infrastructure/database/postgres-approved-loan-transaction.ts
+      tests:
+        - src/application/persist-approved-loan.test.ts
+        - src/interfaces/http/loan-decisions.test.ts
+
+    enforcement:
+      mode: test
+      command: >
+        npx vitest run
+        src/application/persist-approved-loan.test.ts
+        src/interfaces/http/loan-decisions.test.ts
+      blocking: true
+
+  - id: idempotency-conflict
+    type: contract-invariant
+    category: reliability
+    severity: critical
+
+    statement: >
+      Reusing an idempotency key with a different payload must be rejected
+      as a conflict and must not create or change a loan.
+
+    triggers:
+      paths:
+        - "src/application/**"
+        - "src/interfaces/http/**"
+        - "src/infrastructure/database/**"
+
+    evidence:
+      implementation:
+        - src/application/persist-approved-loan.ts
+        - src/interfaces/http/create-app.ts
+        - src/infrastructure/database/postgres-approved-loan-transaction.ts
+      tests:
+        - src/application/persist-approved-loan.test.ts
+        - src/interfaces/http/loan-decisions.test.ts
+
+    enforcement:
+      mode: test
+      command: >
+        npx vitest run
+        src/application/persist-approved-loan.test.ts
+        src/interfaces/http/loan-decisions.test.ts
+      blocking: true
+
+  - id: concurrent-decisions-preserve-policy
+    type: system-invariant
+    category: consistency
+    severity: critical
+
+    statement: >
+      Concurrent decisions must not collectively approve exposure beyond
+      the limit defined by the active concentration policy.
+
+    triggers:
+      paths:
+        - "src/domain/**"
+        - "src/application/**"
+        - "src/infrastructure/database/**"
+
+    evidence:
+      implementation:
+        - src/application/persist-approved-loan.ts
+        - src/infrastructure/database/postgres-approved-loan-transaction.ts
+      tests:
+        - src/application/loan-decision-concurrency.test.ts
+
+    enforcement:
+      mode: test
+      command: >
+        npx vitest run
+        src/application/loan-decision-concurrency.test.ts
+      blocking: true
+
+  - id: loans-are-source-of-truth
+    type: data-invariant
+    category: data-integrity
+    severity: critical
+
+    statement: >
+      Approved loans must remain the authoritative exposure records.
+      Exposure aggregates must be reconstructible from approved loans.
+
+    triggers:
+      paths:
+        - "src/application/**"
+        - "src/infrastructure/database/**"
+
+    evidence:
+      implementation:
+        - src/infrastructure/database/postgres-exposure-rebuilder.ts
+        - src/infrastructure/database/postgres-exposure-repository.ts
+      tests:
+        - src/infrastructure/database/postgres-exposure-rebuilder.test.ts
+        - src/infrastructure/database/postgres-exposure-repository.test.ts
+
+    enforcement:
+      mode: test
+      command: >
+        npx vitest run
+        src/infrastructure/database/postgres-exposure-rebuilder.test.ts
+        src/infrastructure/database/postgres-exposure-repository.test.ts
+      blocking: true
+
+  - id: domain-is-independent
+    type: architectural-constraint
+    category: architecture
+    severity: high
+
+    statement: >
+      Domain code must not depend on HTTP, PostgreSQL, Express,
+      environment variables, or infrastructure implementations.
+
+    triggers:
+      paths:
+        - "src/domain/**"
+
+    scope:
+      paths:
+        - "src/domain/**"
+
+    constraints:
+      forbidden_imports:
+        - "src/application/**"
+        - "src/interfaces/**"
+        - "src/infrastructure/**"
+      forbidden_packages:
+        - express
+        - pg
+        - process
+        - node:process
+
+      forbidden_expressions:
+        - "process.env"
+
+    enforcement:
+      mode: static-analysis
+      command: node scripts/check-domain-imports.mjs
+      produces:
+        - scanned-files
+        - dependency-violations
+        - expression-violations
+      blocking: true
+
+  - id: no-sensitive-data-in-logs
+    type: repository-policy
+    category: security
+    severity: critical
+
+    statement: >
+      Logs must not contain credentials, secrets, complete request
+      payloads, or complete personal identifiers.
+
+    triggers:
+      paths:
+        - "src/**"
+
+    evidence:
+      implementation:
+        - src/infrastructure/logging/technical-logger.ts
+      tests:
+        - src/infrastructure/logging/technical-logger.test.ts
+
+    enforcement:
+      mode: test
+      command: >
+        npx vitest run
+        src/infrastructure/logging/technical-logger.test.ts
+      blocking: true
+
+  - id: no-committed-secrets
+    type: repository-policy
+    category: security
+    severity: critical
+
+    statement: >
+      Repository content and Git changes must not contain credentials,
+      private keys, access tokens, or production connection strings.
+
+    triggers:
+      paths:
+        - "**/*"
+
+    enforcement:
+      mode: scanner
+      scanner: gitleaks
+
+      local:
+        command: gitleaks git --redact --no-banner --verbose .
+        strategy: full-history
+
+      ci:
+        workflow: .github/workflows/arc-gate.yml
+        strategy: pull-request-range
+
+      produces:
+        - scanned-commits
+        - detected-secrets
+        - affected-files
+      blocking: true

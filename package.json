@@ -12,7 +12,11 @@
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check:architecture": "node scripts/check-domain-imports.mjs",
+    "arc:integrity": "node scripts/check-gate-integrity.mjs",
+    "arc:validate": "node scripts/validate-rules.mjs",
+    "arc:gate": "node scripts/run-arc-gate.mjs"
   },
   "dependencies": {
     "express": "^5.1.0",
@@ -23,8 +27,11 @@
     "@types/express": "^5.0.3",
     "@types/node": "^24.1.0",
     "@types/pg": "^8.20.2",
+    "ajv": "^8.20.0",
+    "minimatch": "^10.2.6",
     "tsx": "^4.20.3",
     "typescript": "^5.9.2",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "yaml": "^2.9.0"
   }
 }

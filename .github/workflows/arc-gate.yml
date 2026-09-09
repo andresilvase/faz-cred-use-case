@@ -108,7 +108,7 @@ jobs:
           fetch-depth: 0
 
       - name: Check gate integrity
-        run: npm run arc:integrity -- "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}"
+        run: npm run arc:integrity -- "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
 
   rule-selection:
     name: Rule selection

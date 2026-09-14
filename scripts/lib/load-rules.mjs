@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import Ajv from "ajv";
 import { parse } from "yaml";
+import { isKnownCheck } from "./check-registry.mjs";
 
 export function loadRules(repositoryRoot = process.cwd()) {
     const rulesPath = path.join(repositoryRoot, ".arc", "rules.yml");
@@ -56,6 +57,18 @@ export function loadRules(repositoryRoot = process.cwd()) {
 
     if (duplicateIds.length > 0) {
         throw new Error(`Duplicate rule IDs: ${duplicateIds.join(", ")}`);
+    }
+
+    const unknownChecks = [
+        ...new Set(
+            rules.rules
+                .map((rule) => rule.enforcement.check)
+                .filter((checkId) => !isKnownCheck(checkId)),
+        ),
+    ];
+
+    if (unknownChecks.length > 0) {
+        throw new Error(`Unknown enforcement checks: ${unknownChecks.join(", ")}`);
     }
 
     return rules;

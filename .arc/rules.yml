@@ -34,6 +34,7 @@ rules:
 
     enforcement:
       mode: test
+      check: concentration-policy-tests
       command: >
         npx vitest run
         src/domain/concentration-policy.test.ts
@@ -67,6 +68,7 @@ rules:
 
     enforcement:
       mode: test
+      check: bootstrap-boundary-tests
       command: >
         npx vitest run
         src/domain/bootstrap-loan-decision.test.ts
@@ -97,6 +99,7 @@ rules:
 
     enforcement:
       mode: test
+      check: denied-decision-side-effects-tests
       command: >
         npx vitest run
         src/application/persist-approved-loan.test.ts
@@ -127,6 +130,7 @@ rules:
 
     enforcement:
       mode: test
+      check: approval-atomicity-tests
       command: >
         npx vitest run
         src/application/persist-approved-loan.test.ts
@@ -159,6 +163,7 @@ rules:
 
     enforcement:
       mode: test
+      check: idempotency-tests
       command: >
         npx vitest run
         src/application/persist-approved-loan.test.ts
@@ -191,6 +196,7 @@ rules:
 
     enforcement:
       mode: test
+      check: idempotency-tests
       command: >
         npx vitest run
         src/application/persist-approved-loan.test.ts
@@ -221,6 +227,7 @@ rules:
 
     enforcement:
       mode: test
+      check: concurrent-decision-policy-tests
       command: >
         npx vitest run
         src/application/loan-decision-concurrency.test.ts
@@ -250,6 +257,7 @@ rules:
 
     enforcement:
       mode: test
+      check: exposure-source-of-truth-tests
       command: >
         npx vitest run
         src/infrastructure/database/postgres-exposure-rebuilder.test.ts
@@ -289,6 +297,7 @@ rules:
 
     enforcement:
       mode: static-analysis
+      check: domain-imports
       command: node scripts/check-domain-imports.mjs
       produces:
         - scanned-files
@@ -317,6 +326,7 @@ rules:
 
     enforcement:
       mode: test
+      check: sensitive-logging-tests
       command: >
         npx vitest run
         src/infrastructure/logging/technical-logger.test.ts
@@ -338,6 +348,7 @@ rules:
     enforcement:
       mode: scanner
       scanner: gitleaks
+      check: gitleaks
 
       local:
         command: gitleaks git --redact --no-banner --verbose .

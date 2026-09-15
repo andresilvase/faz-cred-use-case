@@ -25,6 +25,7 @@ const protectedPatterns = [
     /^scripts\/check-gate-integrity\.mjs$/,
     /^scripts\/lib\/load-rules\.mjs$/,
     /^scripts\/run-arc-gate\.mjs$/,
+    /^scripts\/lib\/check-registry\.mjs$/,
 ];
 
 const protectedFiles = changedFiles.filter((file) =>

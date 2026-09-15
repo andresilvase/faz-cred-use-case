@@ -165,6 +165,7 @@
             "additionalProperties": false,
             "required": [
                 "mode",
+                "check",
                 "blocking"
             ],
             "properties": {
@@ -175,10 +176,6 @@
                         "scanner"
                     ]
                 },
-                "command": {
-                    "type": "string",
-                    "minLength": 1
-                },
                 "scanner": {
                     "type": "string",
                     "minLength": 1
@@ -187,14 +184,9 @@
                     "type": "object",
                     "additionalProperties": false,
                     "required": [
-                        "command",
                         "strategy"
                     ],
                     "properties": {
-                        "command": {
-                            "type": "string",
-                            "minLength": 1
-                        },
                         "strategy": {
                             "type": "string",
                             "minLength": 1
@@ -224,26 +216,13 @@
                 },
                 "blocking": {
                     "type": "boolean"
+                },
+                "check": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
                 }
             },
             "allOf": [
-                {
-                    "if": {
-                        "properties": {
-                            "mode": {
-                                "enum": [
-                                    "test",
-                                    "static-analysis"
-                                ]
-                            }
-                        }
-                    },
-                    "then": {
-                        "required": [
-                            "command"
-                        ]
-                    }
-                },
                 {
                     "if": {
                         "properties": {
@@ -257,11 +236,6 @@
                             "scanner"
                         ],
                         "anyOf": [
-                            {
-                                "required": [
-                                    "command"
-                                ]
-                            },
                             {
                                 "required": [
                                     "local"

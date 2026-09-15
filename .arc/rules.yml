@@ -34,10 +34,7 @@ rules:
 
     enforcement:
       mode: test
-      command: >
-        npx vitest run
-        src/domain/concentration-policy.test.ts
-        src/domain/loan-decision.test.ts
+      check: concentration-policy-tests
       blocking: true
 
   - id: bootstrap-boundary
@@ -67,10 +64,7 @@ rules:
 
     enforcement:
       mode: test
-      command: >
-        npx vitest run
-        src/domain/bootstrap-loan-decision.test.ts
-        src/domain/loan-decision.test.ts
+      check: bootstrap-boundary-tests
       blocking: true
 
   - id: denied-decision-has-no-financial-side-effects
@@ -97,9 +91,7 @@ rules:
 
     enforcement:
       mode: test
-      command: >
-        npx vitest run
-        src/application/persist-approved-loan.test.ts
+      check: denied-decision-side-effects-tests
       blocking: true
 
   - id: approval-is-atomic
@@ -127,10 +119,7 @@ rules:
 
     enforcement:
       mode: test
-      command: >
-        npx vitest run
-        src/application/persist-approved-loan.test.ts
-        src/infrastructure/database/postgres-approved-loan-transaction.test.ts
+      check: approval-atomicity-tests
       blocking: true
 
   - id: idempotent-retry
@@ -159,10 +148,7 @@ rules:
 
     enforcement:
       mode: test
-      command: >
-        npx vitest run
-        src/application/persist-approved-loan.test.ts
-        src/interfaces/http/loan-decisions.test.ts
+      check: idempotency-tests
       blocking: true
 
   - id: idempotency-conflict
@@ -191,10 +177,7 @@ rules:
 
     enforcement:
       mode: test
-      command: >
-        npx vitest run
-        src/application/persist-approved-loan.test.ts
-        src/interfaces/http/loan-decisions.test.ts
+      check: idempotency-tests
       blocking: true
 
   - id: concurrent-decisions-preserve-policy
@@ -221,9 +204,7 @@ rules:
 
     enforcement:
       mode: test
-      command: >
-        npx vitest run
-        src/application/loan-decision-concurrency.test.ts
+      check: concurrent-decision-policy-tests
       blocking: true
 
   - id: loans-are-source-of-truth
@@ -250,10 +231,7 @@ rules:
 
     enforcement:
       mode: test
-      command: >
-        npx vitest run
-        src/infrastructure/database/postgres-exposure-rebuilder.test.ts
-        src/infrastructure/database/postgres-exposure-repository.test.ts
+      check: exposure-source-of-truth-tests
       blocking: true
 
   - id: domain-is-independent
@@ -289,7 +267,7 @@ rules:
 
     enforcement:
       mode: static-analysis
-      command: node scripts/check-domain-imports.mjs
+      check: domain-imports
       produces:
         - scanned-files
         - dependency-violations
@@ -317,9 +295,7 @@ rules:
 
     enforcement:
       mode: test
-      command: >
-        npx vitest run
-        src/infrastructure/logging/technical-logger.test.ts
+      check: sensitive-logging-tests
       blocking: true
 
   - id: no-committed-secrets
@@ -338,9 +314,9 @@ rules:
     enforcement:
       mode: scanner
       scanner: gitleaks
+      check: gitleaks
 
       local:
-        command: gitleaks git --redact --no-banner --verbose .
         strategy: full-history
 
       ci:

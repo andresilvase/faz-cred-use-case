@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { minimatch } from "minimatch";
 import { loadRules } from "./lib/load-rules.mjs";
+import { getCheck } from "./lib/check-registry.mjs";
 
 const [, , baseSha, headSha = "HEAD"] = process.argv;
 
@@ -37,8 +38,38 @@ const activatedRules = rulesDocument.rules
     })
     .filter(({ matchedFiles }) => matchedFiles.length > 0);
 
+
+const selectedChecks = new Map();
+
+for (const { rule } of activatedRules) {
+    const checkId = rule.enforcement.check;
+    const existing = selectedChecks.get(checkId);
+
+    if (existing) {
+        existing.ruleIds.push(rule.id);
+        continue;
+    }
+
+    selectedChecks.set(checkId, {
+        check: getCheck(checkId),
+        ruleIds: [rule.id],
+    });
+}
+
 console.log(`Changed files: ${changedFiles.length}`);
 console.log(`Activated rules: ${activatedRules.length}`);
+
+console.log(`\nEnforcement checks: ${selectedChecks.size}`);
+
+for (const [checkId, { check, ruleIds }] of selectedChecks) {
+    console.log(`\n- ${checkId}`);
+    console.log(`  Kind: ${check.kind}`);
+    console.log(`  Rules: ${ruleIds.join(", ")}`);
+
+    if (check.kind === "external") {
+        console.log(`  Enforced by: ${check.job}`);
+    }
+}
 
 for (const { rule, matchedFiles } of activatedRules) {
     console.log(`\n[${rule.severity.toUpperCase()}] ${rule.id}`);

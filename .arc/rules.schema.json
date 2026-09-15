@@ -176,10 +176,6 @@
                         "scanner"
                     ]
                 },
-                "command": {
-                    "type": "string",
-                    "minLength": 1
-                },
                 "scanner": {
                     "type": "string",
                     "minLength": 1
@@ -188,14 +184,9 @@
                     "type": "object",
                     "additionalProperties": false,
                     "required": [
-                        "command",
                         "strategy"
                     ],
                     "properties": {
-                        "command": {
-                            "type": "string",
-                            "minLength": 1
-                        },
                         "strategy": {
                             "type": "string",
                             "minLength": 1
@@ -236,23 +227,6 @@
                     "if": {
                         "properties": {
                             "mode": {
-                                "enum": [
-                                    "test",
-                                    "static-analysis"
-                                ]
-                            }
-                        }
-                    },
-                    "then": {
-                        "required": [
-                            "command"
-                        ]
-                    }
-                },
-                {
-                    "if": {
-                        "properties": {
-                            "mode": {
                                 "const": "scanner"
                             }
                         }
@@ -262,11 +236,6 @@
                             "scanner"
                         ],
                         "anyOf": [
-                            {
-                                "required": [
-                                    "command"
-                                ]
-                            },
                             {
                                 "required": [
                                     "local"
